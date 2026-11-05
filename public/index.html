@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JUFOSearch · Journal finder</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap masthead-inner">
+      <a class="brand" href="/"><span class="mark" aria-hidden="true">J</span> JUFOSearch</a>
+      <a class="policy" href="https://www.aalto.fi/en/services/open-access-agreements" target="_blank" rel="noopener">Aalto publishing agreements ↗</a>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">JOURNAL FINDER</p>
+      <h1 id="page-title">Find a journal</h1>
+      <p class="lede">Look up a journal or discover where research on your topic is published.</p>
+      <form id="search">
+        <fieldset class="modes">
+          <legend class="sr-only">Search by</legend>
+          <label><input type="radio" name="mode" value="journal" checked> Journal title or ISSN</label>
+          <label><input type="radio" name="mode" value="topic"> Research topic</label>
+        </fieldset>
+        <div class="search-row">
+          <label for="query" id="query-label" class="sr-only">Journal title or ISSN</label>
+          <input id="query" type="search" name="q" placeholder="Journal title, ISSN or initials" minlength="2" maxlength="160" required>
+          <button class="primary" type="submit">Search</button>
+        </div>
+      </form>
+      <div class="examples">
+        <span>Explore a topic</span>
+        <button type="button" data-query="physics">Physics</button>
+        <button type="button" data-query="ml">Machine learning</button>
+        <button type="button" data-query="cfd">CFD</button>
+      </div>
+    </section>
+    <section class="results" aria-label="Search results">
+      <p id="status" role="status" aria-live="polite">Results include JUFO classification, publishing fees and licence information.</p>
+      <p id="notices" role="status" hidden></p>
+      <fieldset id="filters" class="filters" hidden>
+        <legend class="sr-only">Filter results</legend>
+        <label>JUFO level <select name="level"></select></label>
+        <label>Publisher <select name="publisher"></select></label>
+        <label>APC support <select name="fee"></select></label>
+        <label>Licence <select name="licence"></select></label>
+        <label>Publishing model <select name="model"></select></label>
+        <button id="reset-filters" class="secondary" type="button">Clear filters</button>
+      </fieldset>
+      <p id="filter-status" role="status" hidden></p>
+      <div id="cards"></div>
+    </section>
+    <footer>
+      <a href="https://jfp.csc.fi/jufoportal" target="_blank" rel="noopener">JUFO Portal ↗</a>
+      <a href="https://search.scifree.se/aalto" target="_blank" rel="noopener">Aalto SciFree ↗</a>
+      <a href="https://www.crossref.org/documentation/retrieve-metadata/rest-api/" target="_blank" rel="noopener">Crossref ↗</a>
+      <a href="https://finelib.fi/open-access-publishing-in-elsevier-journals/" target="_blank" rel="noopener">FinELib ↗</a>
+    </footer>
+  </main>
+  <dialog id="agreement-dialog" aria-labelledby="agreement-title">
+    <header class="dialog-header">
+      <h2 id="agreement-title"></h2>
+      <form method="dialog"><button class="secondary" type="submit" autofocus>Close</button></form>
+    </header>
+    <div id="agreement-body"></div>
+  </dialog>
+</body>
+</html>
