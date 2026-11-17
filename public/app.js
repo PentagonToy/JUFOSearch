@@ -8,7 +8,7 @@ const notices = document.querySelector("#notices");
 const queryLabel = document.querySelector("#query-label");
 const filters = document.querySelector("#filters");
 const filterStatus = document.querySelector("#filter-status");
-const filterFields = [...filters.querySelectorAll("select")];
+const filterFields = [...filters.querySelectorAll(".facet")];
 const agreementDialog = document.querySelector("#agreement-dialog");
 const agreementTitle = document.querySelector("#agreement-title");
 const agreementBody = document.querySelector("#agreement-body");
@@ -45,9 +45,68 @@ function reported(value) {
   return value && value.toLowerCase() !== "unknown" ? value : null;
 }
 
+const oaIconPaths = {
+  lock: "M5 10h14v11H5zM8 10V7a4 4 0 0 1 7.5-2M12 14v3",
+  repo: "M4 9h16v11H4zM3 5h18v4H3zM9 13h6",
+  file: "M6 3h8l4 4v14H6zM14 3v5h4M9 12h6m-6 4h6",
+};
+
+function oaLabel(label, icon) {
+  const badge = element("span", null, "oa-label");
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", oaIconPaths[icon]);
+  svg.append(path);
+  badge.append(svg, element("span", label));
+  return badge;
+}
+
+function articleAccess(doi) {
+  const button = element("button", "Check article OA", "secondary");
+  button.type = "button";
+  const result = element("span", null, "article-oa-result");
+  result.setAttribute("role", "status");
+  const access = element("div", null, "article-access");
+  access.append(button, result);
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    result.textContent = "Checking OpenAlex…";
+    try {
+      const response = await fetch("https://api.openalex.org/works/https://doi.org/"
+        + encodeURIComponent(doi) + "?select=open_access", {signal: AbortSignal.timeout(8000)});
+      if (!response.ok) throw new Error("OpenAlex lookup failed");
+      const {open_access: oa} = await response.json();
+      const status = oa?.oa_status;
+      const labels = {
+        diamond: ["Diamond OA", "No APC", "lock"],
+        gold: ["Gold OA", "Fully open access", "lock"],
+        hybrid: ["Hybrid OA", "Open access at publisher", "lock"],
+        green: ["Green OA", "Repository copy", "repo"],
+        bronze: ["Bronze OA", "Free to read · Open licence unverified", "file"],
+      };
+      if (Object.hasOwn(labels, status)) {
+        const [label, note, icon] = labels[status];
+        result.replaceChildren(oaLabel(label, icon), element("small", note));
+        if (/^https?:\/\//i.test(oa.oa_url || "")) result.append(link("Read open copy", oa.oa_url));
+      } else {
+        result.textContent = status === "closed" ? "OpenAlex found no open copy." : "OA status unavailable.";
+      }
+      button.hidden = true;
+    } catch {
+      result.textContent = "Could not check article OA. Try again.";
+      button.disabled = false;
+    }
+  });
+  return access;
+}
+
 function journalFacts(journal) {
   const agreement = journal.agreement;
-  const model = agreement?.model || reported(journal.external?.oa_info?.open_access_type);
+  const oa = journal.external?.oa_info;
+  const model = agreement?.model || reported(oa?.open_access_type);
   const fee = agreement?.status === "quota_exhausted" ? "Quota exhausted"
     : agreement?.discount === 100 ? "Fully covered"
     : agreement ? agreement.discount + "% APC discount" : "Check SciFree";
@@ -56,7 +115,9 @@ function journalFacts(journal) {
     publisher: journal.publisher_name || "Unknown publisher",
     fee,
     licence: agreement?.licence || reported(journal.external?.license?.channel) || "See journal",
-    model: model === "Pure OA" || model === "Open access" ? "Fully open access" : model || "See journal",
+    model: oa?.is_diamondOA === true ? "Diamond OA"
+      : model === "Pure OA" || model === "Open access" ? "Gold OA"
+      : model === "Hybrid" ? "Hybrid OA" : model || "See journal",
   };
 }
 
@@ -97,7 +158,8 @@ function showAgreement(journal, sciFreeUrl) {
 
 function evaluationHistory(history) {
   const entries = Object.entries(history || {})
-    .filter(([year, level]) => /^\d{4}$/.test(year) && /^[0-3]$/.test(String(level)))
+    .filter(([year]) => /^\d{4}$/.test(year))
+    .map(([year, level]) => [year, /^[0-3]$/.test(String(level)) ? Number(level) : null])
     .sort(([a], [b]) => Number(b) - Number(a));
   const details = element("details");
   details.append(element("summary", "JUFO evaluation history"));
@@ -105,6 +167,21 @@ function evaluationHistory(history) {
     details.append(element("p", "JUFO has no recorded annual levels for this journal."));
     return details;
   }
+  const plot = element("div", null, "history-plot");
+  const chronological = entries.slice().reverse();
+  const x = index => 36 + index * 396 / Math.max(1, entries.length - 1);
+  const y = level => 112 - (level ?? 0) * 29;
+  const grid = [0, 1, 2, 3].map(level =>
+    `<path class="history-grid" d="M36 ${y(level)}H432"/><text x="14" y="${y(level) + 4}">${level}</text>`).join("");
+  const points = chronological.map(([, level], index) => x(index) + "," + y(level)).join(" ");
+  const markers = chronological.map(([year, level], index) =>
+    `<circle class="${level === null ? "history-missing" : "history-recorded"}" cx="${x(index)}" cy="${y(level)}" r="4"><title>${year} · ${level === null ? "No level recorded" : "Level " + level}</title></circle>`).join("");
+  plot.innerHTML = `<svg viewBox="0 0 456 148" role="img" aria-label="JUFO levels by year. See the table for exact values.">
+    ${grid}<polyline class="history-line" points="${points}"/>${markers}
+    <text x="36" y="137">${chronological[0][0]}</text>
+    ${entries.length > 1 ? `<text x="432" y="137" text-anchor="end">${entries[0][0]}</text>` : ""}
+  </svg>`;
+  plot.append(element("p", "Open circles at 0 indicate years without a recorded level."));
   const table = element("table", null, "history-table");
   const headers = table.createTHead().insertRow();
   for (const label of ["Year", "JUFO level"]) {
@@ -116,9 +193,9 @@ function evaluationHistory(history) {
   for (const [year, level] of entries) {
     const row = body.insertRow();
     row.insertCell().textContent = year;
-    row.insertCell().textContent = "Level " + level;
+    row.insertCell().textContent = level === null ? "No level recorded" : "Level " + level;
   }
-  details.append(table);
+  details.append(plot, table);
   return details;
 }
 
@@ -164,6 +241,20 @@ function renderJournal(journal, topic) {
     element("p", [journal.publisher_name, identifiers.join(" / "),
       journal.is_active === false ? "Inactive" : ""].filter(Boolean).join(" · "), "metadata")
   );
+  const indexing = journal.wos_indexing;
+  const wosListed = journal.external?.index_info?.includes("WOS");
+  if (indexing || wosListed) {
+    const row = element("div", null, "indexing");
+    if (indexing) {
+      for (const collection of indexing.collections) {
+        row.append(link(collection, indexing.source));
+      }
+      row.append(element("small", "Indexing source checked " + indexing.checked));
+    } else {
+      row.append(element("small", "Web of Science · Collection unverified"));
+    }
+    article.append(row);
+  }
   const facts = element("dl", null, "facts");
   facts.append(
     fact("JUFO classification", level, "Publication Forum", "accent"),
@@ -171,8 +262,10 @@ function renderJournal(journal, topic) {
       : agreement ? "Aalto SciFree · " + agreement.publisher : "Verify with Aalto", feeTone),
     fact(agreement?.licence ? "Agreement licence" : "Journal licence", licence,
       agreement?.licence ? "Aalto agreement" : licence === "See journal" ? "Licence unavailable in JUFO" : "Reported by JUFO"),
-    fact("Publishing model", model, agreement?.source ? "FinELib title list" : agreement ? "Aalto SciFree"
-      : model === "See journal" ? "Model unavailable in JUFO" : "Reported by JUFO")
+    fact("Publishing model", model.endsWith(" OA") ? oaLabel(model, "lock") : model,
+      model === "Diamond OA" ? "No APC · JUFO"
+        : agreement?.source ? "FinELib title list" : agreement ? "Aalto SciFree"
+        : model === "See journal" ? "Model unavailable in JUFO" : "Reported by JUFO")
   );
   article.append(facts);
 
@@ -186,7 +279,7 @@ function renderJournal(journal, topic) {
     const list = element("ul");
     for (const work of journal.examples) {
       const item = element("li");
-      item.append(link(work.title, "https://doi.org/" + encodeURI(work.doi)));
+      item.append(link(work.title, "https://doi.org/" + encodeURI(work.doi)), articleAccess(work.doi));
       list.append(item);
     }
     evidence.append(list);
@@ -204,6 +297,11 @@ function renderJournal(journal, topic) {
     notes.append(element("p", "JUFO reports immediate self-archiving of the accepted manuscript"
       + (acceptedLicence ? " under " + acceptedLicence : "") + "."));
   }
+  if (indexing || wosListed) {
+    const indexing = element("p", "Check current Web of Science coverage by ISSN in the ");
+    indexing.append(link("Clarivate Master Journal List", "https://mjl.clarivate.com/"));
+    notes.append(indexing);
+  }
   article.append(evaluationHistory(journal.level_history), notes);
   const sources = element("div", null, "sources");
   sources.append(link("Aalto SciFree", sciFreeUrl),
@@ -218,31 +316,50 @@ function showResults(journals, topic) {
     card: renderJournal(journal, topic),
   }));
   for (const field of filterFields) {
-    const present = new Set(rows.map(row => row.values[field.name]));
-    const values = field.name === "level"
+    const name = field.dataset.field;
+    const present = new Set(rows.map(row => row.values[name]));
+    const values = name === "level"
       ? ["0", "1", "2", "3", ...(present.has("Unclassified") ? ["Unclassified"] : [])]
       : [...present].sort();
-    field.replaceChildren(new Option("All", ""), ...values.map(value => new Option(value, value)));
-    field.disabled = values.length < 2;
+    field.open = false;
+    field.querySelector(".choices").replaceChildren(...values.map(value => {
+      const label = element("label");
+      const checkbox = element("input");
+      checkbox.type = "checkbox";
+      checkbox.value = value;
+      label.append(checkbox, element("span", value));
+      return label;
+    }));
   }
   filters.hidden = rows.length < 2;
 
   function applyFilters() {
+    const active = [];
+    for (const field of filterFields) {
+      const selected = [...field.querySelectorAll("input:checked")].map(input => input.value);
+      field.querySelector("summary span").textContent = selected.length ? selected.length + " selected" : "";
+      if (selected.length) active.push([field.dataset.field, selected]);
+    }
+
     let visible = 0;
     for (const {values, card} of rows) {
-      card.hidden = filterFields.some(field => field.value && values[field.name] !== field.value);
+      card.hidden = active.some(([name, selected]) => !selected.includes(values[name]));
       if (!card.hidden) visible++;
     }
-    filterStatus.hidden = visible === rows.length;
     filterStatus.textContent = visible ? visible + " of " + rows.length + " shown"
       : "No journals match these filters. Clear a filter to see more results.";
+    reset.disabled = !active.length;
   }
 
+  const reset = document.querySelector("#reset-filters");
   filters.onchange = applyFilters;
-  document.querySelector("#reset-filters").onclick = () => {
-    for (const field of filterFields) field.value = "";
+  reset.onclick = () => {
+    for (const input of filters.querySelectorAll("input:checked")) input.checked = false;
     applyFilters();
+    filterFields[0].querySelector("summary").focus();
   };
+  filterStatus.hidden = rows.length === 0;
+  if (rows.length) applyFilters();
   cards.replaceChildren(...rows.map(row => row.card));
 }
 
@@ -296,7 +413,7 @@ async function search(query) {
     }
     const acronymCount = data.results.filter(journal => journal.matched_acronym).length;
     if (acronymCount > 1) {
-      statusLine.textContent += " · " + acronymCount + " share these initials. Compare titles and ISSNs.";
+      statusLine.textContent += " · " + acronymCount + " share these initials.";
     }
     showResults(data.results, data.topic);
     if (!count && !data.topic) {

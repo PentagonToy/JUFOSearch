@@ -345,6 +345,20 @@ def search_topic(topic):
     return list(matches.values()), notices
 
 
+@lru_cache(maxsize=1)
+def journal_indexing():
+    path = Path(__file__).with_name("journal-indexing.json")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def add_indexing(rows):
+    index = journal_indexing()
+    for row in rows:
+        records = [index[issn] for issn in sorted(journal_identifiers(row)) if issn in index]
+        if records and all(record == records[0] for record in records):
+            row["wos_indexing"] = records[0]
+
+
 def add_agreements(rows):
     today = datetime.now(ZoneInfo("Europe/Helsinki")).date()
     lookup = any(row.get("is_active") and journal_identifiers(row) for row in rows)
@@ -415,6 +429,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 results, notices = search_topic(topic) if topic_mode else (search_journal(query), [])
                 add_agreements(results)
+                add_indexing(results)
             except (OSError, ValueError):
                 service = "Topic search" if topic_mode else "JUFO"
                 self.send_json(502, {"error": f"{service} is temporarily unavailable. Try again shortly."})

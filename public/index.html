@@ -16,7 +16,6 @@
   </header>
   <main class="wrap">
     <section class="hero" aria-labelledby="page-title">
-      <p class="eyebrow">JOURNAL FINDER</p>
       <h1 id="page-title">Find a journal</h1>
       <p class="lede">Look up a journal or discover where research on your topic is published.</p>
       <form id="search">
@@ -43,11 +42,11 @@
       <p id="notices" role="status" hidden></p>
       <fieldset id="filters" class="filters" hidden>
         <legend class="sr-only">Filter results</legend>
-        <label>JUFO level <select name="level"></select></label>
-        <label>Publisher <select name="publisher"></select></label>
-        <label>APC support <select name="fee"></select></label>
-        <label>Licence <select name="licence"></select></label>
-        <label>Publishing model <select name="model"></select></label>
+        <details class="facet" data-field="level"><summary>JUFO level <span></span></summary><fieldset><legend class="sr-only">JUFO level</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="publisher"><summary>Publisher <span></span></summary><fieldset><legend class="sr-only">Publisher</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="fee"><summary>APC support <span></span></summary><fieldset><legend class="sr-only">APC support</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="licence"><summary>Licence <span></span></summary><fieldset><legend class="sr-only">Licence</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="model"><summary>Publishing model <span></span></summary><fieldset><legend class="sr-only">Publishing model</legend><div class="choices"></div></fieldset></details>
         <button id="reset-filters" class="secondary" type="button">Clear filters</button>
       </fieldset>
       <p id="filter-status" role="status" hidden></p>
