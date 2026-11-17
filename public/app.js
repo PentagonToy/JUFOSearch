@@ -241,20 +241,7 @@ function renderJournal(journal, topic) {
     element("p", [journal.publisher_name, identifiers.join(" / "),
       journal.is_active === false ? "Inactive" : ""].filter(Boolean).join(" · "), "metadata")
   );
-  const indexing = journal.wos_indexing;
   const wosListed = journal.external?.index_info?.includes("WOS");
-  if (indexing || wosListed) {
-    const row = element("div", null, "indexing");
-    if (indexing) {
-      for (const collection of indexing.collections) {
-        row.append(link(collection, indexing.source));
-      }
-      row.append(element("small", "Indexing source checked " + indexing.checked));
-    } else {
-      row.append(element("small", "Web of Science · Collection unverified"));
-    }
-    article.append(row);
-  }
   const facts = element("dl", null, "facts");
   facts.append(
     fact("JUFO classification", level, "Publication Forum", "accent"),
@@ -297,8 +284,8 @@ function renderJournal(journal, topic) {
     notes.append(element("p", "JUFO reports immediate self-archiving of the accepted manuscript"
       + (acceptedLicence ? " under " + acceptedLicence : "") + "."));
   }
-  if (indexing || wosListed) {
-    const indexing = element("p", "Check current Web of Science coverage by ISSN in the ");
+  if (wosListed) {
+    const indexing = element("p", "JUFO lists Web of Science indexing. Check current coverage by ISSN in the ");
     indexing.append(link("Clarivate Master Journal List", "https://mjl.clarivate.com/"));
     notes.append(indexing);
   }

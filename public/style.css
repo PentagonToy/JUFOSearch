@@ -112,6 +112,3 @@ dialog::backdrop { background: rgb(15 30 24 / 55%); }
 .history-recorded { fill: var(--green); }
 .history-missing { fill: var(--surface); stroke: var(--green); stroke-width: 2; }
 .history-table { font-variant-numeric: tabular-nums; }
-
-.indexing { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: center; margin: -.25rem 0 .75rem; }
-.indexing a { padding: .1rem .45rem; border-radius: 4px; background: var(--soft); font-size: .8rem; font-weight: 700; }
