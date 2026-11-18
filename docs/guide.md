@@ -32,6 +32,8 @@ The app retrieves every title-result page automatically, grouping up to five JUF
 
 ## Interpret the results
 
+The five most recent searches are stored only in the current browser's local storage. Select a recent query to search again, or **Clear history** to remove the list. A different browser starts with an empty history. Search links containing `?q=...` still open the query encoded in that link.
+
 Select a journal title to open its publisher page when a website is available. Use the separate Aalto SciFree link to check publishing support. Filter results by JUFO level, publisher, APC support, licence or publishing model. Select the APC status to see available contract terms, article types, quota information and sources. **Journal notes** contains subject areas and self-archiving information. Each card distinguishes an Aalto agreement licence from the licence reported by JUFO. [Aalto SciFree](https://search.scifree.se/aalto)
 
 Evaluation histories exclude years before the journal's start year, when JUFO supplies that date. The graph shows the complete history; the table shows the latest five years. Hover or focus a point to see its year and level. Missing annual values appear as open circles at the graph's zero baseline, with dashed links, and **Not recorded** in the table. Filled circles and solid links indicate recorded JUFO levels, including an explicit level 0. The time axis includes its endpoints and intermediate two- or five-year ticks, with closely spaced endpoint labels omitted. Publisher names containing missing-character markers are labelled **Publisher name incomplete**, with an explanation in Journal notes; the API preserves the source text.

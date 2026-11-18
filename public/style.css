@@ -24,6 +24,7 @@ button { cursor: pointer; }
 .policy, footer, .sources { font-size: .85rem; }
 .hero { padding: clamp(1.5rem, 4vw, 3rem) 0 2.15rem; }
 h1 { font-size: 2.75rem; line-height: 1; letter-spacing: -.04em; margin: .55rem 0 .8rem; }
+.hero-note { margin: 0 0 1.4rem; color: var(--muted); max-width: 65ch; }
 form { max-width: 100%; }
 .search-row { display: flex; gap: .6rem; }
 input[type="search"] { min-width: 0; flex: 1; padding: .9rem 1rem; border-radius: 10px; border: 1px solid #a6b5aa; background: white; color: inherit; }
@@ -32,6 +33,14 @@ input[type="search"] { min-width: 0; flex: 1; padding: .9rem 1rem; border-radius
 .examples { display: flex; gap: .55rem; align-items: center; flex-wrap: wrap; margin-top: .8rem; color: var(--muted); font-size: .82rem; }
 .examples button { border: 1px solid var(--line); border-radius: 999px; color: var(--green); background: #fff; padding: .35rem .7rem; }
 .examples button:hover { background: #e8f2ea; }
+.recent-searches { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem .75rem; margin-top: 1rem; font-size: .8rem; color: var(--muted); }
+.recent-searches .examples { margin: 0; min-width: 0; }
+.recent-searches .examples button { max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+.text-button { border: 0; background: none; color: var(--green); padding: .5rem 0; text-decoration: underline; text-underline-offset: .2em; }
+.welcome { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.8rem; margin: 0; padding: 2rem 0 2.5rem; }
+.welcome dt { font-size: .95rem; font-weight: 700; color: var(--green); }
+.welcome dd { margin: .5rem 0 0; font-size: .85rem; line-height: 1.6; font-weight: 400; color: var(--muted); }
+.github-link { margin-inline-start: auto; }
 .results { border-top: 1px solid var(--line); min-height: 4.5rem; }
 #status { color: var(--muted); font-size: .9rem; margin: 1rem 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: clamp(1rem, 3vw, 1.35rem); margin-bottom: .75rem; overflow-wrap: anywhere; }
@@ -50,6 +59,8 @@ details p { color: var(--muted); font-size: .9rem; line-height: 1.55; }
 footer { border-top: 1px solid var(--line); padding: 1.1rem 0 2rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 680px) {
+  .welcome { grid-template-columns: 1fr; gap: 1.3rem; padding-block: 1.5rem 2rem; }
+  .welcome dd { margin-top: .2rem; }
   h1 { font-size: 2.15rem; }
   .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .policy { text-align: right; max-width: 10rem; }

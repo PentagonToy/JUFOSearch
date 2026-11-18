@@ -15,6 +15,49 @@ const agreementDialog = document.querySelector("#agreement-dialog");
 const agreementTitle = document.querySelector("#agreement-title");
 const agreementBody = document.querySelector("#agreement-body");
 let activeSearch;
+const RECENT_KEY = "jufosearch.recent.v1";
+let recentSearches = readRecentSearches();
+
+function recentQueries(queries) {
+  if (!Array.isArray(queries)) return [];
+  const seen = new Set();
+  return queries.filter(query => {
+    if (typeof query !== "string" || query.trim().length < 2 || query.trim().length > 160) return false;
+    const key = query.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 5).map(query => query.trim());
+}
+
+function readRecentSearches() {
+  try {
+    return recentQueries(JSON.parse(localStorage.getItem(RECENT_KEY)));
+  } catch {
+    return [];
+  }
+}
+
+function renderRecentSearches() {
+  const list = document.querySelector("#recent-queries");
+  list.replaceChildren(...recentSearches.map(query => {
+    const button = element("button", query);
+    button.type = "button";
+    button.addEventListener("click", () => search(query));
+    return button;
+  }));
+  document.querySelector("#recent-searches").hidden = recentSearches.length === 0;
+}
+
+function saveRecentSearches() {
+  try {
+    if (recentSearches.length) localStorage.setItem(RECENT_KEY, JSON.stringify(recentSearches));
+    else localStorage.removeItem(RECENT_KEY);
+  } catch {
+    // Searches still work when browser storage is unavailable.
+  }
+  renderRecentSearches();
+}
 
 function element(tag, content, className) {
   const node = document.createElement(tag);
@@ -470,6 +513,9 @@ function showResults(journals) {
 }
 
 async function search(query, mode = "auto") {
+  document.querySelector("#welcome").hidden = true;
+  recentSearches = recentQueries([query, ...recentSearches]);
+  saveRecentSearches();
   activeSearch?.abort();
   const request = new AbortController();
   activeSearch = request;
@@ -547,6 +593,12 @@ document.querySelectorAll("[data-query]").forEach(button => {
     search(button.dataset.query);
   });
 });
+document.querySelector("#clear-recent").addEventListener("click", () => {
+  recentSearches = [];
+  saveRecentSearches();
+  queryInput.focus();
+});
+renderRecentSearches();
 const initialParams = new URLSearchParams(location.search);
 const initialQuery = initialParams.get("q");
 if (initialQuery?.trim().length >= 2 && initialQuery.length <= 160) {

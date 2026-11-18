@@ -6,7 +6,7 @@ const vm = require("node:vm");
 
 const context = vm.createContext({
   document: {
-    querySelector: () => ({querySelectorAll: () => [], addEventListener() {}}),
+    querySelector: () => ({querySelectorAll: () => [], addEventListener() {}, replaceChildren() {}}),
     querySelectorAll: () => [],
   },
   location: {search: ""},
@@ -17,6 +17,24 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, "public/app.js"), "utf8"), 
 function value(expression) {
   return JSON.parse(JSON.stringify(vm.runInContext(expression, context)));
 }
+
+test("recent searches validate local data, deduplicate and keep only five", () => {
+  assert.deepEqual(value('recentQueries([" ML ", "ml", null, 3, "a", "x".repeat(161), "CFD", "SGS", "TCI", "Physics", "Energy"])'),
+    ["ML", "CFD", "SGS", "TCI", "Physics"]);
+  assert.deepEqual(value('recentQueries({query: "CFD"})'), []);
+  assert.deepEqual(value('readRecentSearches()'), []);
+});
+
+test("recent search history comes only from this browser's storage", () => {
+  let stored = '["CFD","ML"]';
+  context.localStorage = {getItem: key => key === "jufosearch.recent.v1" ? stored : null};
+  assert.deepEqual(value('readRecentSearches()'), ["CFD", "ML"]);
+  stored = null;
+  assert.deepEqual(value('readRecentSearches()'), []);
+  stored = '{broken';
+  assert.deepEqual(value('readRecentSearches()'), []);
+  delete context.localStorage;
+});
 
 test("history begins at publication and missing evaluations stay missing", () => {
   assert.deepEqual(value('annualLevels({2020: "0", 2021: "0", 2022: "0", 2023: "0", 2024: "", 2025: "1", 2026: "1"}, 2024)'),

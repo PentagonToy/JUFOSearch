@@ -17,6 +17,7 @@
   <main class="wrap">
     <section class="hero" aria-labelledby="page-title">
       <h1 id="page-title">Find a journal</h1>
+      <p class="hero-note">Explore journals. Check rankings, publishing support and open access.</p>
       <form id="search">
         <div class="search-row">
           <label for="query" class="sr-only">Journal title, ISSN, initials or keywords</label>
@@ -29,8 +30,18 @@
         <button type="button" data-query="ml">Machine learning</button>
         <button type="button" data-query="cfd">CFD</button>
       </div>
+      <div id="recent-searches" class="recent-searches" role="group" aria-label="Recent searches on this browser" hidden>
+        <span>Recent · this browser</span>
+        <div id="recent-queries" class="examples"></div>
+        <button id="clear-recent" class="text-button" type="button">Clear history</button>
+      </div>
     </section>
     <section class="results" aria-label="Search results">
+      <dl id="welcome" class="welcome">
+        <div><dt>JUFO levels &amp; history</dt><dd>Compare classifications and changes over time.</dd></div>
+        <div><dt>Aalto publishing support</dt><dd>Check APC coverage, discounts and agreement terms.</dd></div>
+        <div><dt>Open access &amp; licences</dt><dd>Review publishing models and available reuse rights.</dd></div>
+      </dl>
       <p id="status" role="status" aria-live="polite"></p>
       <p id="notices" role="status" hidden></p>
       <fieldset id="filters" class="filters" hidden>
@@ -65,6 +76,7 @@
       <a href="https://search.scifree.se/aalto" target="_blank" rel="noopener">Aalto SciFree ↗</a>
       <a href="https://www.crossref.org/documentation/retrieve-metadata/rest-api/" target="_blank" rel="noopener">Crossref ↗</a>
       <a href="https://finelib.fi/open-access-publishing-in-elsevier-journals/" target="_blank" rel="noopener">FinELib ↗</a>
+      <a class="github-link" href="https://github.com/PentagonToy/JUFOSearch" target="_blank" rel="noopener">GitHub ↗</a>
     </footer>
   </main>
   <dialog id="agreement-dialog" aria-labelledby="agreement-title">
