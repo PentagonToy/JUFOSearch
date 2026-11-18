@@ -229,7 +229,7 @@ function evaluationHistory(history, yearStart) {
       return `<path class="history-grid" d="M${x(year)} 116v5"/><text x="${x(year)}" y="146" text-anchor="${anchor}">${year}</text>`;
     }).join("");
     const plot = element("figure", null, "history-plot");
-    plot.innerHTML = `<svg viewBox="0 0 456 160" role="img" aria-label="Annual JUFO levels from ${first} to ${last}. Open circles at 0 and dashed links indicate missing records. Filled circles show recorded levels. Exact values are in the table.">
+    plot.innerHTML = `<svg viewBox="0 0 456 160" role="img" aria-label="Annual JUFO levels from ${first} to ${last}. Open circles at 0 and dashed links indicate missing records. Filled circles show recorded levels. Recent values are in the table.">
       ${grid}${lines}${markers}${ticks}
     </svg>`;
     const legend = element("figcaption", null, "history-legend");
@@ -245,7 +245,7 @@ function evaluationHistory(history, yearStart) {
     plot.append(legend);
 
     const table = element("table", null, "history-table");
-    table.append(element("caption", "Annual JUFO evaluation record", "sr-only"));
+    table.append(element("caption", "Recent annual JUFO evaluations", "sr-only"));
     const headers = table.createTHead().insertRow();
     for (const label of ["Year", "JUFO level"]) {
       const header = element("th", label);
@@ -253,9 +253,8 @@ function evaluationHistory(history, yearStart) {
       headers.append(header);
     }
     const body = table.createTBody();
-    for (const [index, [year, level]] of entries.slice().reverse().entries()) {
+    for (const [year, level] of entries.slice(-5).reverse()) {
       const row = body.insertRow();
-      row.hidden = index >= 5;
       const yearCell = element("th", String(year));
       yearCell.scope = "row";
       row.append(yearCell);
@@ -263,22 +262,7 @@ function evaluationHistory(history, yearStart) {
         level === null ? "history-unrecorded" : level === 0 ? "history-level history-level-zero" : "history-level"));
     }
     const content = element("div", null, "history-content");
-    const record = element("div", null, "history-record");
-    record.append(table);
-    if (entries.length > 5) {
-      const toggle = element("button", "Show all years", "secondary");
-      toggle.type = "button";
-      toggle.setAttribute("aria-expanded", "false");
-      toggle.addEventListener("click", () => {
-        const expanded = toggle.getAttribute("aria-expanded") !== "true";
-        toggle.setAttribute("aria-expanded", String(expanded));
-        toggle.textContent = expanded ? "Show recent 5" : "Show all years";
-        for (const [index, row] of [...body.rows].entries()) row.hidden = !expanded && index >= 5;
-        content.classList.toggle("history-expanded", expanded);
-      });
-      record.append(toggle);
-    }
-    content.append(plot, record);
+    content.append(plot, table);
     details.append(content);
   });
   return details;

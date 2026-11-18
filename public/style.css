@@ -78,9 +78,6 @@ dialog::backdrop { background: rgb(15 30 24 / 55%); }
 .agreement-details dd { margin: .2rem 0 0; padding: .5rem .65rem; background: #f4f6f2; border-radius: 6px; font-weight: 400; }
 
 .history-content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(12rem, .55fr); gap: 1.5rem; align-items: stretch; padding-block: 1rem; }
-.history-record { display: flex; flex-direction: column; gap: .5rem; min-width: 0; }
-.history-record .secondary { align-self: start; min-height: 44px; }
-.history-expanded { align-items: start; }
 .history-table { width: 100%; border-collapse: collapse; font-size: .88rem; text-align: left; font-variant-numeric: tabular-nums; }
 .history-table th, .history-table td { padding: .55rem .7rem; border-bottom: 1px solid var(--line); }
 .history-table thead { background: var(--soft); color: var(--muted); font-size: .78rem; }
@@ -121,8 +118,8 @@ dialog::backdrop { background: rgb(15 30 24 / 55%); }
 .history-plot { display: flex; flex-direction: column; min-width: 0; margin: 0; }
 .history-plot > svg { flex: 1; min-height: 0; }
 .history-plot svg { display: block; width: 100%; font-size: 14px; fill: var(--muted); }
-.history-plot figcaption { font-size: .8rem; color: var(--muted); line-height: 1.5; margin-top: .5rem; max-width: 48ch; }
-.history-legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; }
+.history-plot figcaption { font-size: .8rem; color: var(--muted); line-height: 1.5; margin-top: .5rem; }
+.history-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem 1rem; }
 .history-key { display: inline-flex; align-items: center; gap: .4rem; }
 .history-key svg { width: 2rem; height: .85rem; flex: none; overflow: visible; }
 .history-grid { stroke: var(--line); }
