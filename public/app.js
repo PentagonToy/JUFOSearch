@@ -243,7 +243,9 @@ function evaluationHistory(history, yearStart) {
         tooltip.textContent = point.getAttribute("aria-label");
         tooltip.hidden = false;
       };
-      const hide = () => { tooltip.hidden = true; };
+      const hide = () => {
+        if (!point.matches(":hover") && !point.matches(":focus")) tooltip.hidden = true;
+      };
       point.addEventListener("pointerenter", show);
       point.addEventListener("pointerleave", hide);
       point.addEventListener("focus", show);
