@@ -18,7 +18,29 @@ class JournalSearchTests(unittest.TestCase):
               patch.object(server.time, "sleep") as sleep):
             server.topic_works("subgrid scale")
             server.topic_works("machine learning")
-        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0, 1])
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0, 1.1])
+
+    def test_crossref_rate_limit_gets_one_bounded_retry(self):
+        limited = server.HTTPError(server.CROSSREF, 429, "Rate limited", {"Retry-After": "1"}, None)
+        with (patch.object(server, "download", side_effect=[limited, b'{"message":{"items":[]}}']) as download,
+              patch.object(server.time, "sleep")):
+            self.assertEqual(server.topic_works("reactor"), [])
+        self.assertEqual(download.call_count, 2)
+
+        for code, delay in [(429, "60"), (429, "Wed, 18 Nov 2026 12:00:00 GMT"), (503, "1")]:
+            error = server.HTTPError(server.CROSSREF, code, "Unavailable", {"Retry-After": delay}, None)
+            with (patch.object(server, "download", side_effect=error) as download,
+                  patch.object(server.time, "sleep")):
+                with self.assertRaises(server.HTTPError):
+                    server.topic_works("reactor")
+                self.assertEqual(download.call_count, 1)
+
+    def test_macos_preserves_rate_limit_status_for_the_shared_retry(self):
+        error = server.subprocess.CalledProcessError(22, "curl", stderr=b"curl: (22) HTTP error: 429")
+        with patch.object(server.subprocess, "run", side_effect=error):
+            with self.assertRaises(server.HTTPError) as caught:
+                server.download_macos(server.CROSSREF, 8)
+        self.assertEqual(caught.exception.code, 429)
 
     def test_keyword_lists_expand_deduplicate_and_preserve_phrases(self):
         expected = {"computational fluid dynamics": "CFD", "machine learning": "ML",

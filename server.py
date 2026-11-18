@@ -17,6 +17,7 @@ from html import unescape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
@@ -119,6 +120,8 @@ def download_macos(url, timeout):
             check=True, capture_output=True,
         ).stdout
     except subprocess.CalledProcessError as error:
+        if error.returncode == 22 and b"429" in (error.stderr or b""):
+            raise HTTPError(url, 429, "Too many requests", None, None) from error
         raise OSError("Could not retrieve the upstream source") from error
 
 
@@ -389,9 +392,17 @@ def topic_works(topic, keywords=None, minimum=1):
     }
     # Crossref's public list endpoint permits one request per second and one in flight.
     with crossref_lock:
-        time.sleep(max(0, 1 - (time.monotonic() - crossref_checked)))
-        crossref_checked = time.monotonic()
-        data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
+        for attempt in range(2):
+            time.sleep(max(0, 1.1 - (time.monotonic() - crossref_checked)))
+            crossref_checked = time.monotonic()
+            try:
+                data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
+                break
+            except HTTPError as error:
+                retry_after = error.headers.get("Retry-After", "1") if error.headers else "1"
+                if error.code != 429 or attempt or not retry_after.isdigit() or int(retry_after) > 2:
+                    raise
+                time.sleep(max(1, int(retry_after)))
     venues = {}
     for item in data["message"]["items"]:
         titles = item.get("title") or []
