@@ -125,6 +125,7 @@ dialog::backdrop { background: rgb(15 30 24 / 55%); }
 .history-grid { stroke: var(--line); }
 .history-line { fill: none; stroke: var(--green); stroke-width: 2; }
 .history-line-unrecorded { stroke: var(--muted); stroke-dasharray: 5 5; }
+.history-key .history-line-unrecorded { stroke-dasharray: 10 10; }
 .history-recorded { fill: var(--green); }
 .history-missing { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }
 .history-hit-area { fill: transparent; }
