@@ -4,13 +4,135 @@ import json
 import io
 import unittest
 from datetime import datetime
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 from unittest.mock import patch
 
 import server
 
 
 class JournalSearchTests(unittest.TestCase):
+    def test_crossref_requests_are_spaced_without_parallel_calls(self):
+        with (patch.object(server, "download", return_value=b'{"message":{"items":[]}}'),
+              patch.object(server, "crossref_checked", 0),
+              patch.object(server.time, "monotonic", return_value=100),
+              patch.object(server.time, "sleep") as sleep):
+            server.topic_works("subgrid scale")
+            server.topic_works("machine learning")
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0, 1])
+
+    def test_keyword_lists_expand_deduplicate_and_preserve_phrases(self):
+        expected = {"computational fluid dynamics": "CFD", "machine learning": "ML",
+                    "subgrid scale": "SGS", "turbulence chemistry interaction": "TCI"}
+        self.assertEqual(server.keyword_topics("CFD, ML, SGS, TCI"), expected)
+        self.assertEqual(server.keyword_topics("cfd ML sgs tci"), expected)
+        self.assertEqual(server.keyword_topics("CFD, cfd, machine learning"),
+                         {"computational fluid dynamics": "CFD", "machine learning": "machine learning"})
+        self.assertEqual(server.keyword_topics("C&F"), {"c&f": "C&F"})
+
+    def test_keyword_matching_handles_hyphens_plurals_and_method_names(self):
+        title = "Neural-network sub-grid-scale models for large-eddy simulations"
+        for topic in ("computational fluid dynamics", "machine learning", "subgrid scale"):
+            self.assertTrue(server.matches_topic(topic, title))
+        self.assertTrue(server.matches_topic("turbulence chemistry interaction", "Turbulence–chemistry interactions in flames"))
+        self.assertTrue(server.matches_topic("machine learning", "ML for turbulence"))
+        self.assertFalse(server.matches_topic("machine learning", "Clinical scale measurements"))
+        self.assertFalse(server.matches_topic("turbulence chemistry interaction", title))
+
+    def test_keyword_article_search_retains_only_evidenced_concepts(self):
+        payload = {"message": {"items": [
+            {"DOI": "10.1/sgs", "title": ["Neural-network sub-grid-scale models for large-eddy simulations"],
+             "container-title": ["Fluid journal"], "ISSN": ["1234-5678"]},
+            {"DOI": "10.1/other", "title": ["Machine learning for medical imaging"],
+             "container-title": ["Clinical journal"], "ISSN": ["1234-5679"]},
+        ]}}
+        topics = server.keyword_topics("CFD, ML, SGS, TCI")
+        with patch.object(server, "download", return_value=json.dumps(payload).encode()):
+            venues = server.topic_works("subgrid scale", keywords=topics)
+        self.assertEqual(len(venues), 1)
+        self.assertEqual(venues[0]["works"]["10.1/sgs"]["keywords"], ["CFD", "ML", "SGS"])
+
+    def test_keyword_search_merges_issn_variants_and_ranks_shared_articles(self):
+        topics = server.keyword_topics("CFD, ML, SGS, TCI")
+        shared = {"title": "Neural SGS LES", "doi": "10.1/shared", "keywords": ["CFD", "ML", "SGS"]}
+        flame = {"title": "TCI flow model", "doi": "10.1/flame", "keywords": ["CFD", "TCI"]}
+        generic = {"title": "ML paper", "doi": "10.1/ml", "keywords": ["ML"]}
+
+        def articles(topic, keywords=None):
+            if topic == "subgrid scale":
+                raise OSError("Unavailable")
+            return [
+                {"issns": ("1234-5678",), "works": {shared["doi"]: shared}},
+                {"issns": ("1234-5679",), "works": {flame["doi"]: flame}},
+                {"issns": ("1234-5680",), "works": {generic["doi"]: generic}},
+            ]
+
+        def venue(identifiers):
+            return {"jufo_id": 2 if identifiers[0] == "1234-5680" else 1, "title": "Journal", "is_active": True}
+
+        with (patch.object(server, "topic_works", side_effect=articles),
+              patch.object(server, "find_venue", side_effect=venue)):
+            rows, notices = server.search_keywords(topics)
+        self.assertEqual([row["jufo_id"] for row in rows], [1, 2])
+        self.assertEqual(rows[0]["matched_keywords"], ["CFD", "ML", "SGS", "TCI"])
+        self.assertEqual(rows[0]["keyword_total"], 4)
+        self.assertEqual(len(rows[0]["examples"]), 2)
+        self.assertEqual(notices, ["SGS article lookup unavailable."])
+
+    def test_keyword_search_reports_total_source_failure(self):
+        with patch.object(server, "topic_works", side_effect=OSError("Unavailable")):
+            with self.assertRaises(OSError):
+                server.search_keywords(server.keyword_topics("CFD, ML"))
+
+    def test_keyword_search_keeps_examples_for_less_frequent_keywords(self):
+        works = {str(index): {"doi": str(index), "title": "Paper", "keywords": keywords}
+                 for index, keywords in enumerate([["CFD", "ML"], ["CFD", "ML"], ["CFD", "ML"], ["TCI"]])}
+        venues = [{"issns": ("1234-5678",), "works": works}]
+        with (patch.object(server, "topic_works", return_value=venues),
+              patch.object(server, "find_venue", return_value={"jufo_id": 1})):
+            rows, _ = server.search_keywords(server.keyword_topics("CFD, ML, TCI"))
+        self.assertEqual(len(rows[0]["examples"]), 3)
+        self.assertTrue(any("TCI" in work["keywords"] for work in rows[0]["examples"]))
+
+    def test_keyword_search_stops_new_lookups_when_time_budget_expires(self):
+        with (patch.object(server.time, "monotonic", side_effect=[0, 1, 26]),
+              patch.object(server, "topic_works", return_value=[]) as lookup):
+            rows, notices = server.search_keywords(server.keyword_topics("CFD, ML"))
+        self.assertEqual(rows, [])
+        self.assertEqual(lookup.call_count, 1)
+        self.assertEqual(notices, ["ML article lookup unavailable."])
+
+    def test_auto_routes_keyword_lists_and_preserves_comma_titles(self):
+        handler = server.Handler.__new__(server.Handler)
+        query = "CFD, ML, SGS, TCI"
+        handler.path = "/api/search?" + urlencode({"q": query, "mode": "auto"})
+        row = {"jufo_id": 1, "title": "Journal", "matched_keywords": ["ML", "SGS"], "keyword_total": 4}
+        with (patch.object(server, "search_jufo", return_value=[]),
+              patch.object(server, "search_keywords", return_value=([row], [])) as keywords,
+              patch.object(server, "add_agreements"), patch.object(handler, "send_json") as response):
+            handler.do_GET()
+            keywords.assert_called_once_with(server.keyword_topics(query))
+            self.assertEqual(response.call_args.args[1]["results"][0]["matched_keywords"], ["ML", "SGS"])
+            self.assertIsNone(response.call_args.args[1]["next_offset"])
+
+        title = {"jufo_id": 1, "title": "Energy, sustainability and society"}
+        handler.path = "/api/search?" + urlencode({"q": title["title"], "mode": "auto"})
+        with (patch.object(server, "search_jufo", return_value=[title]),
+              patch.object(server, "search_journal_batch", return_value=([title], None)),
+              patch.object(server, "search_keywords") as keywords,
+              patch.object(server, "add_agreements"), patch.object(handler, "send_json")):
+            handler.do_GET()
+            keywords.assert_not_called()
+
+    def test_invalid_keyword_lists_are_rejected(self):
+        handler = server.Handler.__new__(server.Handler)
+        for query in (",,,", "a,b,c,d,e,f,g,h,i"):
+            handler.path = "/api/search?" + urlencode({"q": query, "mode": "auto"})
+            with (patch.object(server, "search_keywords") as keywords,
+                  patch.object(handler, "send_json") as response):
+                handler.do_GET()
+                keywords.assert_not_called()
+                self.assertEqual(response.call_args.args[0], 400)
+
     def test_parallel_batches_preserve_every_record_at_page_boundaries(self):
         for count in (0, 99, 100, 101, 400, 500, 501):
             with self.subTest(count=count):

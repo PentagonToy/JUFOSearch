@@ -19,8 +19,8 @@
       <h1 id="page-title">Find a journal</h1>
       <form id="search">
         <div class="search-row">
-          <label for="query" class="sr-only">Journal title, ISSN, initials or research topic</label>
-          <input id="query" type="search" name="q" placeholder="Journal title, ISSN, initials or research topic" minlength="2" maxlength="160" required>
+          <label for="query" class="sr-only">Journal title, ISSN, initials or keywords</label>
+          <input id="query" type="search" name="q" placeholder="Journal, ISSN or keywords" minlength="2" maxlength="160" required>
           <button class="primary" type="submit">Search</button>
         </div>
       </form>
@@ -28,6 +28,7 @@
         <button type="button" data-query="physics">Physics</button>
         <button type="button" data-query="ml">Machine learning</button>
         <button type="button" data-query="cfd">CFD</button>
+        <button type="button" data-query="CFD, ML, SGS, TCI">CFD · ML · SGS · TCI</button>
       </div>
     </section>
     <section class="results" aria-label="Search results">

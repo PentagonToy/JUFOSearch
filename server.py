@@ -26,6 +26,14 @@ TOPIC_ALIASES = {
     "physcis": "physics",
     "ml": "machine learning",
     "cfd": "computational fluid dynamics",
+    "sgs": "subgrid scale",
+    "tci": "turbulence chemistry interaction",
+}
+TOPIC_VARIANTS = {
+    "computational fluid dynamics": ("computational fluid dynamics", "cfd", "large eddy simulation", "direct numerical simulation"),
+    "machine learning": ("machine learning", "deep learning", "neural network", "ml"),
+    "subgrid scale": ("subgrid scale", "subgrid", "subfilter scale", "sgs"),
+    "turbulence chemistry interaction": ("turbulence chemistry interaction", "turbulent chemistry interaction", "turbulence chemistry", "tci"),
 }
 TITLE_STOP_WORDS = {"a", "an", "and", "for", "in", "of", "on", "the", "jufo"}
 TOPIC_STARTERS = {
@@ -43,7 +51,7 @@ ISSN_FIELDS = ("issn_electronic", "issn_print", "issnl")
 RESULT_FIELDS = (
     "jufo_id", "title", "publisher_name", *ISSN_FIELDS, "website", "is_active",
     "level", "level_history", "year_start", "okm_disciplines", "matched_acronym", "examples",
-    "topic_match", "agreement", "agreement_status",
+    "topic_match", "matched_keywords", "keyword_total", "agreement", "agreement_status",
 )
 LIST_URL = (
     "https://extra.kansalliskirjasto.fi/finelib_julkinen/lehtilistat/"
@@ -83,6 +91,8 @@ ISSN = re.compile(r"[0-9]{4}-?[0-9]{3}[0-9X]", re.I)
 NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 list_lock = Lock()
 list_cache = (0, None, None)
+crossref_lock = Lock()
+crossref_checked = 0
 
 
 def download(url, timeout=8):
@@ -308,6 +318,38 @@ def needs_topic_search(query, rows):
                    for row in rows)
 
 
+def keyword_topics(query):
+    query = normalise_journal_query(query)
+    parts = re.split(r"[,;，]+", query)
+    words = query.split()
+    if len(parts) == 1 and len(words) > 1 and all(word.casefold() in TOPIC_ALIASES for word in words):
+        parts = words
+
+    topics = {}
+    for part in parts:
+        normalised = " ".join(part.casefold().split())
+        if normalised:
+            topic = TOPIC_ALIASES.get(normalised, normalised)
+            label = normalised.upper() if normalised in TOPIC_ALIASES and len(normalised) <= 3 else part.strip()
+            topics.setdefault(topic, label)
+
+    return topics
+
+
+def topic_words(text):
+    text = re.sub(r"\bsub[-\s]+grid\b", "subgrid", folded(text))
+    words = set(title_keywords(text))
+    words.update(word for word in re.findall(r"[^\W_]+", text)
+                 if len(word) <= 2 and word not in TITLE_STOP_WORDS)
+    return words
+
+
+def matches_topic(topic, title):
+    words = topic_words(title)
+    return any(topic_words(variant) and topic_words(variant) <= words
+               for variant in TOPIC_VARIANTS.get(topic, (topic,)))
+
+
 def compact_result(row):
     result = {field: row[field] for field in RESULT_FIELDS if field in row}
     external = row.get("external") or {}
@@ -330,7 +372,8 @@ def find_venue(identifiers):
     return None
 
 
-def topic_works(topic):
+def topic_works(topic, keywords=None):
+    global crossref_checked
     since = date.today().year - 4
     parameters = {
         "query.title": topic,
@@ -338,8 +381,13 @@ def topic_works(topic):
         "rows": 60,
         "select": "DOI,title,container-title,ISSN",
     }
-    data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
-    terms = set(re.findall(r"[^\W_]+", topic.casefold()))
+    # Crossref's public list endpoint permits one request per second and one in flight.
+    with crossref_lock:
+        time.sleep(max(0, 1 - (time.monotonic() - crossref_checked)))
+        try:
+            data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
+        finally:
+            crossref_checked = time.monotonic()
     venues = {}
     for item in data["message"]["items"]:
         titles = item.get("title") or []
@@ -348,12 +396,77 @@ def topic_works(topic):
         doi = item.get("DOI")
         if not (titles and names and identifiers and doi):
             continue
-        if not terms <= set(re.findall(r"[^\W_]+", titles[0].casefold())):
+        if not matches_topic(topic, titles[0]):
             continue
         key = (names[0].casefold(), tuple(sorted(identifiers)))
         venue = venues.setdefault(key, {"issns": key[1], "works": {}})
-        venue["works"][doi] = {"title": titles[0], "doi": doi}
+        work = {"title": titles[0], "doi": doi}
+        if keywords:
+            work["keywords"] = [label for term, label in keywords.items() if matches_topic(term, titles[0])]
+        venue["works"][doi] = work
+    if keywords:
+        return sorted(venues.values(), key=lambda venue: keyword_rank(list(venue["works"].values())))[:12]
     return sorted(venues.values(), key=lambda venue: -len(venue["works"]))[:8]
+
+
+def keyword_rank(works):
+    coverage = {keyword for work in works for keyword in work["keywords"]}
+    return (-max((len(work["keywords"]) for work in works), default=0), -len(coverage), -len(works))
+
+
+def search_keywords(topics):
+    venues = {}
+    notices = []
+    successful = 0
+    deadline = time.monotonic() + 25
+    for topic, label in topics.items():
+        try:
+            if time.monotonic() >= deadline:
+                raise OSError("Article lookup budget exhausted")
+            batch = topic_works(topic, keywords=topics)
+        except (OSError, ValueError, KeyError, TypeError):
+            notices.append(f"{label} article lookup unavailable.")
+            continue
+        successful += 1
+        for venue in batch:
+            key = tuple(sorted(venue["issns"]))
+            match = venues.setdefault(key, {"issns": key, "works": {}})
+            match["works"].update(venue["works"])
+    if not successful:
+        raise OSError("Article search is temporarily unavailable.")
+
+    candidates = sorted(venues.values(), key=lambda venue: keyword_rank(list(venue["works"].values())))[:32]
+    matches = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        pending = [(venue, pool.submit(find_venue, venue["issns"][:2])) for venue in candidates]
+        for venue, future in pending:
+            try:
+                row = future.result()
+            except (OSError, ValueError):
+                if "Some JUFO records unavailable." not in notices:
+                    notices.append("Some JUFO records unavailable.")
+                continue
+            if row is None:
+                continue
+            match = matches.setdefault(row["jufo_id"], dict(row, examples=[], matched_keywords=[], keyword_total=len(topics)))
+            works = {work["doi"]: work for work in match["examples"]}
+            works.update(venue["works"])
+            match["examples"] = sorted(works.values(), key=lambda work: -len(work["keywords"]))
+            coverage = {keyword for work in match["examples"] for keyword in work["keywords"]}
+            match["matched_keywords"] = [label for label in topics.values() if label in coverage]
+
+    results = sorted(matches.values(), key=lambda row: keyword_rank(row["examples"]))
+    for row in results:
+        remaining = row["examples"]
+        examples = []
+        covered = set()
+        for _ in range(min(3, len(remaining))):
+            work = max(remaining, key=lambda item: (len(set(item["keywords"]) - covered), len(item["keywords"])))
+            examples.append(work)
+            covered.update(work["keywords"])
+            remaining.remove(work)
+        row["examples"] = examples
+    return results, notices
 
 
 def search_topic(topic):
@@ -467,6 +580,11 @@ class Handler(BaseHTTPRequestHandler):
             normalised = " ".join(query.casefold().split())
             topic = TOPIC_ALIASES.get(normalised, normalised)
             mode = parameters.get("mode", ["journal"])[0]
+            topics = keyword_topics(query)
+            keyword_list = len(topics) > 1 or bool(re.search(r"[,;，]", query))
+            if mode in {"auto", "topic"} and (not topics or len(topics) > 8):
+                self.send_json(400, {"error": "Enter between 1 and 8 keywords."})
+                return
             topic_mode = (parameters.get("mode") == ["topic"]
                           and not ISSN.fullmatch(normalise_journal_query(query)))
             offset_text = parameters.get("offset", ["0"])[0]
@@ -482,8 +600,18 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 next_offset = None
                 notices = []
-                if topic_mode:
-                    results, notices = search_topic(topic)
+                if mode == "auto" and keyword_list and not offset:
+                    rows = search_jufo(normalise_journal_query(query))
+                    if any(folded(row["title"]) == folded(normalise_journal_query(query)) for row in rows):
+                        results, next_offset = search_journal_batch(query, offset, pages)
+                    else:
+                        topic_mode = True
+                        results, notices = search_keywords(topics)
+                        for row in results:
+                            row["topic_match"] = query
+                        topic = query
+                elif topic_mode:
+                    results, notices = search_keywords(topics) if keyword_list else search_topic(topic)
                     for row in results:
                         row["topic_match"] = topic
                 else:

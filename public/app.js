@@ -345,6 +345,11 @@ function renderJournal(journal) {
   );
   article.append(facts);
 
+  if (journal.matched_keywords?.length) {
+    article.append(element("p", journal.matched_keywords.length + "/" + journal.keyword_total
+      + " keywords · " + journal.matched_keywords.join(" · "), "evidence"));
+  }
+
   if (journal.examples?.length) {
     const evidence = element("div", null, "evidence");
     evidence.append(element("p", "Matching articles · Crossref"));
@@ -352,6 +357,7 @@ function renderJournal(journal) {
     for (const work of journal.examples) {
       const item = element("li");
       item.append(link(work.title, "https://doi.org/" + encodeURI(work.doi)), articleAccess(work.doi));
+      if (work.keywords?.length) item.append(element("small", work.keywords.join(" · ")));
       list.append(item);
     }
     evidence.append(list);
