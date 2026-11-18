@@ -97,7 +97,6 @@ dialog::backdrop { background: rgb(15 30 24 / 55%); }
 .facet label:has(input:checked) { font-weight: 700; color: var(--green); background: var(--selected); }
 .facet label { border-radius: 5px; }
 #reset-filters:disabled { opacity: .65; cursor: default; }
-.facet[data-field="level"] .choices { display: flex; flex-wrap: wrap; }
 
 .oa-label { display: inline-flex; align-items: center; gap: .4rem; font-weight: 700; }
 .oa-label svg { width: 1.2rem; height: 1.2rem; flex: none; fill: none; stroke: var(--green); stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }

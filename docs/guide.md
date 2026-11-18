@@ -16,12 +16,12 @@ On the Workspace MacBook, use `/Volumes/PentagonToy/Workspace/Agents/Environment
 
 | Search mode | Example | What it returns |
 | --- | --- | --- |
-| Journal title or ISSN | `Results in Physics` or `2211-3797` | Up to 30 journal and series records from the CSC JUFO API. [CSC API documentation](https://wiki.eduuni.fi/spaces/cscvirtajtp/pages/578257375/v2.x) |
+| Journal title or ISSN | `Results in Physics` or `2211-3797` | Journal and series records from the CSC JUFO API, with up to 100 title matches per page. Select **Load more journals** for further matches. Filters apply to the loaded records and retain their selections when more records are loaded. [CSC API documentation](https://wiki.eduuni.fi/spaces/cscvirtajtp/pages/578257375/v2.x) |
 | Research topic | `turbulent combustion` | Journals with matching article titles. Each result can show up to two articles with DOI links. [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) |
 
 In journal mode, if a title search returns no matches, JUFOSearch tries individual title words and ranks candidates by word overlap. For example, `application in engineering combustion jufo` finds *Applications in Energy and Combustion Science*. The app also searches an acronym index generated from active scientific journals in the [CSC bulk export](https://wiki.eduuni.fi/spaces/cscvirtajtp/pages/48922203/Julkaisukanavatietokannan%2BREST-rajapinta). It derives forms from title initials and conjunctions, so `C&F` and `CNF` can return both *Combustion and Flame* and *Computers and Fluids*. Each candidate is checked against the live JUFO record. Run `python3.12 refresh_acronyms.py` to rebuild the index from the latest export.
 
-The main search box recognises `physics` (including `physcis`), `ml` and `cfd` as topic shortcuts. These topics begin with selected journals whose records are checked in JUFO. Topic search examines a limited set of recent Crossref article titles, groups matches by journal and checks their ISSNs against active JUFO records. For the three shortcut topics, it also screens article-derived results against relevant JUFO disciplines. Use the results to identify candidates for further review.
+Select **Research topic** to use `physics` (including `physcis`), `ml` and `cfd` as topic shortcuts. The **Explore a topic** buttons select this mode automatically. In journal mode, the same terms search titles and initials. The shortcut topics begin with selected journals whose records are checked in JUFO. Topic search examines a limited set of recent Crossref article titles, groups matches by journal and checks their ISSNs against active JUFO records. For the three shortcut topics, it also screens article-derived results against relevant JUFO disciplines. Use the results to identify candidates for further review.
 
 ## Interpret the results
 

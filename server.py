@@ -149,12 +149,14 @@ def agreements():
         return list_cache[1:]
 
 
-def search_jufo(query, size=30):
+def search_jufo(query, size=100, offset=0):
     is_issn = ISSN.fullmatch(query)
     if is_issn:
         compact = query.replace("-", "").upper()
         query = compact[:4] + "-" + compact[4:]
     parameters = {"issn" if is_issn else "name": query, "type": "series", "_size": size}
+    if offset:
+        parameters["_from"] = offset
     rows = json.loads(download(f"{JUFO}/search?{urlencode(parameters)}"))
     if not isinstance(rows, list):
         raise ValueError("Unexpected JUFO response")
@@ -229,8 +231,10 @@ def normalise_journal_query(query):
     return re.sub(r"[‐‑‒–−]", "-", query)
 
 
-def search_journal(query):
+def search_journal(query, offset=0):
     query = normalise_journal_query(query)
+    if offset:
+        return search_jufo(query, offset=offset)
     if ISSN.fullmatch(query):
         return search_jufo(query)
     rows = search_jufo(query)
@@ -409,17 +413,22 @@ class Handler(BaseHTTPRequestHandler):
                 return
             normalised = " ".join(query.casefold().split())
             topic = TOPIC_ALIASES.get(normalised, normalised)
-            topic_mode = not ISSN.fullmatch(normalise_journal_query(query)) and (
-                parameters.get("mode") == ["topic"] or topic in TOPIC_STARTERS
-            )
+            topic_mode = (parameters.get("mode") == ["topic"]
+                          and not ISSN.fullmatch(normalise_journal_query(query)))
+            offset_text = parameters.get("offset", ["0"])[0]
+            if not offset_text.isascii() or not offset_text.isdigit() or len(offset_text) > 5:
+                self.send_json(400, {"error": "Invalid search page. Start a new search."})
+                return
+            offset = int(offset_text)
             try:
-                results, notices = search_topic(topic) if topic_mode else (search_journal(query), [])
+                results, notices = search_topic(topic) if topic_mode else (search_journal(query, offset), [])
                 add_agreements(results)
             except (OSError, ValueError):
                 service = "Topic search" if topic_mode else "JUFO"
                 self.send_json(502, {"error": f"{service} is temporarily unavailable. Try again shortly."})
             else:
                 self.send_json(200, {"results": results, "notices": notices,
+                                     "next_offset": offset + 100 if not topic_mode and len(results) == 100 else None,
                                      "topic": topic if topic_mode else None})
         else:
             self.send_error(404)
