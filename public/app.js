@@ -221,17 +221,35 @@ function evaluationHistory(history, yearStart) {
     }).join(" ");
     const markers = entries.map(([year, level]) => {
       const className = level === null ? "history-missing" : "history-recorded";
-      const label = level === null ? "Not recorded (shown at baseline)" : "Level " + level;
-      return `<circle class="${className}" cx="${x(year)}" cy="${y(level ?? 0)}" r="4"><title>${year} · ${label}</title></circle>`;
+      const label = level === null ? "Not recorded" : "Level " + level;
+      return `<g class="history-point" data-year="${year}" tabindex="0" role="img" aria-label="${year} · ${label}">
+        <circle class="history-hit-area" cx="${x(year)}" cy="${y(level ?? 0)}" r="18"/>
+        <circle class="${className}" cx="${x(year)}" cy="${y(level ?? 0)}" r="4"/>
+      </g>`;
     }).join("");
     const ticks = historyTicks(entries).map(year => {
       const anchor = first === last ? "middle" : year === first ? "start" : year === last ? "end" : "middle";
       return `<path class="history-grid" d="M${x(year)} 116v5"/><text x="${x(year)}" y="146" text-anchor="${anchor}">${year}</text>`;
     }).join("");
     const plot = element("figure", null, "history-plot");
-    plot.innerHTML = `<svg viewBox="0 0 456 160" role="img" aria-label="Annual JUFO levels from ${first} to ${last}. Open circles at 0 and dashed links indicate missing records. Filled circles show recorded levels. Recent values are in the table.">
+    plot.innerHTML = `<svg viewBox="0 0 456 160" role="group" aria-label="Annual JUFO levels from ${first} to ${last}. Open circles at 0 and dashed links indicate missing records. Filled circles show recorded levels. Recent values are in the table.">
       ${grid}${lines}${markers}${ticks}
     </svg>`;
+    const tooltip = element("div", null, "history-tooltip");
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.hidden = true;
+    for (const point of plot.querySelectorAll(".history-point")) {
+      const show = () => {
+        tooltip.textContent = point.getAttribute("aria-label");
+        tooltip.hidden = false;
+      };
+      const hide = () => { tooltip.hidden = true; };
+      point.addEventListener("pointerenter", show);
+      point.addEventListener("pointerleave", hide);
+      point.addEventListener("focus", show);
+      point.addEventListener("blur", hide);
+    }
+    plot.append(tooltip);
     const legend = element("figcaption", null, "history-legend");
     for (const [label, missing] of [["Recorded", false], ["Not recorded", true]]) {
       const key = element("span", null, "history-key");
