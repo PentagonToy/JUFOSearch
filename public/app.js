@@ -588,11 +588,6 @@ form.addEventListener("submit", event => {
   if (query.length >= 2) search(query);
   else statusLine.textContent = "Enter a journal title, ISSN or research topic.";
 });
-document.querySelectorAll("[data-query]").forEach(button => {
-  button.addEventListener("click", () => {
-    search(button.dataset.query);
-  });
-});
 document.querySelector("#clear-recent").addEventListener("click", () => {
   recentSearches = [];
   saveRecentSearches();
