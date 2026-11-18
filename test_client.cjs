@@ -8,6 +8,7 @@ const context = vm.createContext({
   document: {
     querySelector: () => ({querySelectorAll: () => [], addEventListener() {}, replaceChildren() {}}),
     querySelectorAll: () => [],
+    addEventListener() {},
   },
   location: {search: ""},
   URLSearchParams,
@@ -72,4 +73,12 @@ test("publisher labels preserve Unicode and identify damaged source names", () =
   assert.equal(value('publisherName({publisher_name: "Şükrü Dursun"})'), "Şükrü Dursun");
   assert.equal(value('publisherName({publisher_name: "?smail ?ahin"})'), "Publisher name incomplete");
   assert.equal(value('publisherName({publisher_name: "Bad\\uFFFDname"})'), "Publisher name incomplete");
+});
+
+test("missing metadata has neutral values and unclassified is distinct from zero", () => {
+  assert.deepEqual(value('journalFacts({})'), {
+    level: "Unclassified", publisher: "Unknown publisher", fee: "Check SciFree",
+    licence: "Not listed", model: "Not listed",
+  });
+  assert.equal(value('journalFacts({level: 0}).level'), "0");
 });

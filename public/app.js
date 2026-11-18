@@ -78,7 +78,8 @@ function fact(label, value, note, tone) {
   const item = element("div", null, tone ? "fact " + tone : "fact");
   const definition = element("dd");
   definition.append(value);
-  item.append(element("dt", label), definition, element("small", note));
+  item.append(element("dt", label), definition);
+  if (note) item.append(element("small", note));
   return item;
 }
 
@@ -116,7 +117,7 @@ function oaLabel(label, icon) {
 }
 
 function articleAccess(doi) {
-  const button = element("button", "Check article OA", "secondary");
+  const button = element("button", "Check article OA", "text-button");
   button.type = "button";
   const result = element("span", null, "article-oa-result");
   result.setAttribute("role", "status");
@@ -165,10 +166,10 @@ function journalFacts(journal) {
     level: journal.level == null ? "Unclassified" : String(journal.level),
     publisher: publisherName(journal),
     fee,
-    licence: agreement?.licence || reported(journal.external?.license?.channel) || "See journal",
+    licence: agreement?.licence || reported(journal.external?.license?.channel) || "Not listed",
     model: oa?.is_diamondOA === true ? "Diamond OA"
       : model === "Pure OA" || model === "Open access" ? "Gold OA"
-      : model === "Hybrid" ? "Hybrid OA" : model || "See journal",
+      : model === "Hybrid" ? "Hybrid OA" : model || "Not listed",
   };
 }
 
@@ -359,11 +360,13 @@ function renderJournal(journal) {
   const publisherUrl = journalWebsite(journal);
   if (publisherUrl) heading.append(link(journal.title, publisherUrl));
   else heading.textContent = journal.title;
-  const feeButton = element("button", fee, "fee-link");
-  feeButton.type = "button";
-  feeButton.setAttribute("aria-haspopup", "dialog");
-  feeButton.setAttribute("aria-label", fee + " · View agreement for " + journal.title);
-  feeButton.addEventListener("click", () => showAgreement(journal, sciFreeUrl));
+  const feeButton = agreement ? element("button", fee, "fee-link") : link(fee, sciFreeUrl);
+  if (agreement) {
+    feeButton.type = "button";
+    feeButton.setAttribute("aria-haspopup", "dialog");
+    feeButton.setAttribute("aria-label", fee + " · View agreement for " + journal.title);
+    feeButton.addEventListener("click", () => showAgreement(journal, sciFreeUrl));
+  }
   const feeTone = agreement?.status === "quota_exhausted" ? "warning"
     : agreement?.discount === 100 ? "accent" : "";
   const identifiers = [...new Set([journal.issn_electronic, journal.issn_print, journal.issnl].filter(Boolean))];
@@ -376,34 +379,36 @@ function renderJournal(journal) {
   const wosListed = journal.external?.index_info?.includes("WOS");
   const facts = element("dl", null, "facts");
   facts.append(
-    fact("JUFO classification", level, "Publication Forum", "accent"),
-    fact("Aalto publishing fees", feeButton, agreement?.source ? "FinELib · " + agreement.publisher
-      : agreement ? "Aalto SciFree · " + agreement.publisher : "Verify with Aalto", feeTone),
+    fact("JUFO level", level, null, "accent"),
+    fact("Aalto APC support", feeButton, agreement?.source ? "FinELib · " + agreement.publisher
+      : agreement ? "Aalto SciFree · " + agreement.publisher : null, feeTone),
     fact(agreement?.licence ? "Agreement licence" : "Journal licence", licence,
-      agreement?.licence ? "Aalto agreement" : licence === "See journal" ? "Licence unavailable in JUFO" : "Reported by JUFO"),
+      agreement?.licence ? "Aalto agreement" : null),
     fact("Publishing model", model.endsWith(" OA") ? oaLabel(model, "lock") : model,
       model === "Diamond OA" ? "No APC · JUFO"
         : agreement?.source ? "FinELib title list" : agreement ? "Aalto SciFree"
-        : model === "See journal" ? "Model unavailable in JUFO" : "Reported by JUFO")
+        : null)
   );
   article.append(facts);
 
-  if (journal.matched_keywords?.length) {
-    article.append(element("p", journal.matched_keywords.length + "/" + journal.keyword_total
-      + " keywords · " + journal.matched_keywords.join(" · "), "evidence"));
-  }
-
   if (journal.examples?.length) {
-    const evidence = element("div", null, "evidence");
-    evidence.append(element("p", "Matching articles · Crossref"));
-    const list = element("ul");
-    for (const work of journal.examples) {
-      const item = element("li");
-      item.append(link(work.title, "https://doi.org/" + encodeURI(work.doi)), articleAccess(work.doi));
-      if (work.keywords?.length) item.append(element("small", work.keywords.join(" · ")));
-      list.append(item);
-    }
-    evidence.append(list);
+    const evidence = element("details", null, "evidence");
+    const coverage = journal.matched_keywords?.length
+      ? ` · ${journal.matched_keywords.length}/${journal.keyword_total} keywords` : "";
+    evidence.append(element("summary", "Matching articles" + coverage));
+    evidence.addEventListener("toggle", () => {
+      if (!evidence.open || evidence.querySelector("ul")) return;
+      const list = element("ul");
+      for (const work of journal.examples) {
+        const item = element("li");
+        item.append(link(work.title, "https://doi.org/" + encodeURI(work.doi)));
+        if (work.keywords?.length) item.append(element("small", work.keywords.join(" · ")
+          + (work.abstract_keywords?.length ? " · Includes abstract matches" : "")));
+        item.append(articleAccess(work.doi));
+        list.append(item);
+      }
+      evidence.append(element("p", "Crossref · Article titles and available abstracts"), list);
+    });
     article.append(evidence);
   } else if (journal.topic_match) {
     article.append(element("p", "Topic starting point", "evidence"));
@@ -413,6 +418,7 @@ function renderJournal(journal) {
   notes.append(element("summary", "Journal notes"));
   const fields = journal.okm_disciplines?.map(item => item.localized_labels?.en).filter(Boolean);
   notes.append(element("p", "JUFO ID " + journal.jufo_id + (fields?.length ? " · " + fields.join(" · ") : "")));
+  notes.append(element("p", "Classification and journal metadata: JUFO. Publishing support: Aalto agreements."));
   if (publisherName(journal) === "Publisher name incomplete") {
     notes.append(element("p", "JUFO publisher name incomplete. Verify on the journal website."));
   }
@@ -428,8 +434,7 @@ function renderJournal(journal) {
   }
   article.append(evaluationHistory(journal.level_history, journal.year_start), notes);
   const sources = element("div", null, "sources");
-  sources.append(link("Aalto SciFree", sciFreeUrl),
-    link("JUFO record", "https://jufo-rest.csc.fi/v2.1/channel/" + journal.jufo_id));
+  sources.append(link("JUFO record", "https://jufo-rest.csc.fi/v2.1/channel/" + journal.jufo_id));
   article.append(sources);
   return article;
 }
@@ -463,13 +468,14 @@ function showResults(journals) {
     const active = [];
     for (const field of filterFields) {
       const selected = [...field.querySelectorAll("input:checked")].map(input => input.value);
-      field.querySelector("summary span").textContent = selected.length ? selected.length + " selected" : "";
+      field.querySelector("summary span").textContent = !selected.length ? ""
+        : field.dataset.field === "level" ? selected.join(", ") : String(selected.length);
       if (selected.length) active.push([field.dataset.field, selected]);
     }
 
     filteredRows = rows.filter(({values}) => !active.some(([name, selected]) => !selected.includes(values[name])));
     page = 0;
-    reset.disabled = !active.length;
+    reset.hidden = !active.length;
     renderPage();
   }
 
@@ -479,12 +485,14 @@ function showResults(journals) {
     const start = page * size;
     const end = Math.min(start + size, filteredRows.length);
     cards.replaceChildren(...filteredRows.slice(start, end).map(({journal}) => renderJournal(journal)));
-    filterStatus.textContent = filteredRows.length ? `Showing ${start + 1}–${end} of ${filteredRows.length} ${filteredRows.length === 1 ? "journal" : "journals"}`
+    filterStatus.textContent = filteredRows.length ? (pages > 1 ? `${start + 1}–${end} of ` : "")
+      + `${filteredRows.length} ${filteredRows.length === 1 ? "journal" : "journals"}`
       + (filteredRows.length !== rows.length ? ` · Filtered from ${rows.length}` : "")
       : "No matches. Clear a filter.";
     pagination.hidden = filteredRows.length <= 50;
+    pagination.querySelector("nav").hidden = pages <= 1;
     bottomPagination.hidden = pages <= 1 || !filteredRows.length;
-    for (const label of document.querySelectorAll("[data-page-label]")) label.textContent = `Page ${page + 1} of ${pages}`;
+    for (const label of document.querySelectorAll("[data-page-label]")) label.textContent = `${page + 1} / ${pages}`;
     for (const button of document.querySelectorAll("[data-page]")) {
       const previous = button.dataset.page === "previous";
       button.disabled = previous ? page === 0 : page === pages - 1;
@@ -519,6 +527,10 @@ async function search(query, mode = "auto") {
   activeSearch?.abort();
   const request = new AbortController();
   activeSearch = request;
+  const submit = document.querySelector("#search button[type=submit]");
+  submit.disabled = true;
+  submit.textContent = "Searching…";
+  cards.setAttribute("aria-busy", "true");
   const params = new URLSearchParams({q: query, mode, batch: "5"});
   queryInput.value = query;
   const address = new URLSearchParams({q: query});
@@ -531,6 +543,7 @@ async function search(query, mode = "auto") {
   filterStatus.hidden = true;
   notices.hidden = true;
   statusLine.textContent = "Searching…";
+  statusLine.hidden = false;
   try {
     const matches = new Map();
     const messages = new Set();
@@ -554,20 +567,18 @@ async function search(query, mode = "auto") {
     } while (data.next_offset != null);
     const journals = [...matches.values()];
     const count = journals.length;
-    if (matchedTopic) {
-      statusLine.textContent = count ? "Journals for “" + matchedTopic + "” · " + count + " found"
-        : "No journals found for “" + matchedTopic + "”. Try a shorter topic or a synonym.";
-    } else {
-      statusLine.textContent = count ? count + (count === 1 ? " match" : " matches")
-        : "No JUFO matches. Try the full journal title or an ISSN.";
-    }
+    statusLine.hidden = count > 0;
+    if (!count) statusLine.textContent = matchedTopic
+      ? "No journals matched. Try fewer keywords or a broader term."
+      : "No JUFO matches. Try the full journal title or an ISSN.";
     if (messages.size) {
       notices.textContent = [...messages].join(" ");
       notices.hidden = false;
     }
     const acronymCount = journals.filter(journal => journal.matched_acronym).length;
     if (acronymCount > 1) {
-      statusLine.textContent += " · " + acronymCount + " share these initials.";
+      statusLine.textContent = "These initials match multiple titles. Compare titles and ISSNs.";
+      statusLine.hidden = false;
     }
     showResults(journals);
     if (!count) {
@@ -577,10 +588,36 @@ async function search(query, mode = "auto") {
     }
   } catch (error) {
     if (request.signal.aborted) return;
+    statusLine.hidden = false;
     statusLine.textContent = error.message || "Search failed. Please try again.";
     cards.append(link("Search Aalto SciFree", sciFree(query)));
+  } finally {
+    if (activeSearch === request) {
+      submit.disabled = false;
+      submit.textContent = "Search";
+      cards.setAttribute("aria-busy", "false");
+    }
   }
 }
+
+function closeFilters(except) {
+  for (const field of filterFields) if (field !== except) field.open = false;
+}
+
+for (const field of filterFields) {
+  field.addEventListener("toggle", () => { if (field.open) closeFilters(field); });
+}
+document.addEventListener("click", event => {
+  if (!filters.contains(event.target)) closeFilters();
+});
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  const open = filterFields.find(field => field.open);
+  if (open) {
+    closeFilters();
+    open.querySelector("summary").focus();
+  }
+});
 
 form.addEventListener("submit", event => {
   event.preventDefault();

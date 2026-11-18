@@ -13,6 +13,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from functools import lru_cache
+from html import unescape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
@@ -28,12 +29,14 @@ TOPIC_ALIASES = {
     "cfd": "computational fluid dynamics",
     "sgs": "subgrid scale",
     "tci": "turbulence chemistry interaction",
+    "pasr": "partially stirred reactor",
 }
 TOPIC_VARIANTS = {
     "computational fluid dynamics": ("computational fluid dynamics", "cfd", "large eddy simulation", "direct numerical simulation"),
-    "machine learning": ("machine learning", "deep learning", "neural network", "ml"),
+    "machine learning": ("machine learning", "deep learning", "neural network", "ml", "random forest", "support vector machine", "reinforcement learning", "symbolic regression", "clustering"),
     "subgrid scale": ("subgrid scale", "subgrid", "subfilter scale", "sgs"),
     "turbulence chemistry interaction": ("turbulence chemistry interaction", "turbulent chemistry interaction", "turbulence chemistry", "tci"),
+    "partially stirred reactor": ("partially stirred reactor", "pasr"),
 }
 TITLE_STOP_WORDS = {"a", "an", "and", "for", "in", "of", "on", "the", "jufo"}
 TOPIC_STARTERS = {
@@ -346,8 +349,11 @@ def topic_words(text):
 
 def matches_topic(topic, title):
     words = topic_words(title)
-    return any(topic_words(variant) and topic_words(variant) <= words
-               for variant in TOPIC_VARIANTS.get(topic, (topic,)))
+    for variant in TOPIC_VARIANTS.get(topic, (topic,)):
+        terms = topic_words(variant)
+        if terms and terms <= words:
+            return True
+    return False
 
 
 def compact_result(row):
@@ -372,22 +378,20 @@ def find_venue(identifiers):
     return None
 
 
-def topic_works(topic, keywords=None):
+def topic_works(topic, keywords=None, minimum=1):
     global crossref_checked
-    since = date.today().year - 4
+    since = date.today().year - 9
     parameters = {
-        "query.title": topic,
+        "query.bibliographic" if keywords else "query.title": topic,
         "filter": f"type:journal-article,from-pub-date:{since}-01-01",
         "rows": 60,
-        "select": "DOI,title,container-title,ISSN",
+        "select": "DOI,title,container-title,ISSN,abstract",
     }
     # Crossref's public list endpoint permits one request per second and one in flight.
     with crossref_lock:
         time.sleep(max(0, 1 - (time.monotonic() - crossref_checked)))
-        try:
-            data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
-        finally:
-            crossref_checked = time.monotonic()
+        crossref_checked = time.monotonic()
+        data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
     venues = {}
     for item in data["message"]["items"]:
         titles = item.get("title") or []
@@ -396,16 +400,22 @@ def topic_works(topic, keywords=None):
         doi = item.get("DOI")
         if not (titles and names and identifiers and doi):
             continue
-        if not matches_topic(topic, titles[0]):
+        title = unescape(re.sub(r"</?[A-Za-z][^>]*>", "", titles[0]))
+        abstract = unescape(re.sub(r"<[^>]*>", " ", item.get("abstract") or ""))
+        text = title + " " + abstract
+        matched = [label for term, label in (keywords or {topic: topic}).items() if matches_topic(term, text)]
+        if len(matched) < minimum or (minimum == 1 and not matches_topic(topic, text)):
             continue
         key = (names[0].casefold(), tuple(sorted(identifiers)))
         venue = venues.setdefault(key, {"issns": key[1], "works": {}})
-        work = {"title": titles[0], "doi": doi}
+        work = {"title": title, "doi": doi}
         if keywords:
-            work["keywords"] = [label for term, label in keywords.items() if matches_topic(term, titles[0])]
+            work["keywords"] = matched
+            work["abstract_keywords"] = [label for term, label in keywords.items()
+                                         if label in matched and not matches_topic(term, title)]
         venue["works"][doi] = work
     if keywords:
-        return sorted(venues.values(), key=lambda venue: keyword_rank(list(venue["works"].values())))[:12]
+        return sorted(venues.values(), key=lambda venue: keyword_rank(list(venue["works"].values())))[:24 if minimum > 1 else 12]
     return sorted(venues.values(), key=lambda venue: -len(venue["works"]))[:8]
 
 
@@ -419,11 +429,13 @@ def search_keywords(topics):
     notices = []
     successful = 0
     deadline = time.monotonic() + 25
-    for topic, label in topics.items():
+    lookups = [(" ".join(topics), "Combined keyword", 2)] if len(topics) > 1 else []
+    lookups.extend((topic, label, 1) for topic, label in topics.items())
+    for topic, label, minimum in lookups:
         try:
             if time.monotonic() >= deadline:
                 raise OSError("Article lookup budget exhausted")
-            batch = topic_works(topic, keywords=topics)
+            batch = topic_works(topic, keywords=topics, minimum=minimum)
         except (OSError, ValueError, KeyError, TypeError):
             notices.append(f"{label} article lookup unavailable.")
             continue
@@ -435,7 +447,9 @@ def search_keywords(topics):
     if not successful:
         raise OSError("Article search is temporarily unavailable.")
 
-    candidates = sorted(venues.values(), key=lambda venue: keyword_rank(list(venue["works"].values())))[:32]
+    candidates = [venue for venue in venues.values()
+                  if len(topics) == 1 or any(len(work["keywords"]) >= 2 for work in venue["works"].values())]
+    candidates = sorted(candidates, key=lambda venue: keyword_rank(list(venue["works"].values())))[:32]
     matches = {}
     with ThreadPoolExecutor(max_workers=6) as pool:
         pending = [(venue, pool.submit(find_venue, venue["issns"][:2])) for venue in candidates]

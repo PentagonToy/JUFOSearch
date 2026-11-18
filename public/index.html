@@ -36,7 +36,7 @@
         <div><dt>Aalto publishing support</dt><dd>Check APC coverage, discounts and agreement terms.</dd></div>
         <div><dt>Open access &amp; licences</dt><dd>Review publishing models and available reuse rights.</dd></div>
       </dl>
-      <p id="status" role="status" aria-live="polite"></p>
+      <p id="status" role="status" aria-live="polite" hidden></p>
       <p id="notices" role="status" hidden></p>
       <fieldset id="filters" class="filters" hidden>
         <legend class="sr-only">Filter results</legend>
@@ -45,18 +45,20 @@
         <details class="facet" data-field="fee"><summary>APC support <span></span></summary><fieldset><legend class="sr-only">APC support</legend><div class="choices"></div></fieldset></details>
         <details class="facet" data-field="licence"><summary>Licence <span></span></summary><fieldset><legend class="sr-only">Licence</legend><div class="choices"></div></fieldset></details>
         <details class="facet" data-field="model"><summary>Publishing model <span></span></summary><fieldset><legend class="sr-only">Publishing model</legend><div class="choices"></div></fieldset></details>
-        <button id="reset-filters" class="secondary" type="button">Clear filters</button>
+        <button id="reset-filters" class="text-button" type="button" hidden>Clear filters</button>
       </fieldset>
-      <p id="filter-status" role="status" hidden></p>
-      <div id="pagination" class="pagination" hidden>
-        <label class="page-size" for="page-size">Per page
-          <select id="page-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option></select>
-        </label>
-        <nav class="page-navigation" aria-label="Results pages">
-          <button type="button" class="secondary" data-page="previous">Previous</button>
-          <span data-page-label tabindex="-1"></span>
-          <button type="button" class="secondary" data-page="next">Next</button>
-        </nav>
+      <div class="result-toolbar">
+        <p id="filter-status" role="status" aria-atomic="true" hidden></p>
+        <div id="pagination" class="pagination" hidden>
+          <label class="page-size" for="page-size">Per page
+            <select id="page-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option></select>
+          </label>
+          <nav class="page-navigation" aria-label="Results pages">
+            <button type="button" class="secondary" data-page="previous">Previous</button>
+            <span data-page-label tabindex="-1"></span>
+            <button type="button" class="secondary" data-page="next">Next</button>
+          </nav>
+        </div>
       </div>
       <div id="cards"></div>
       <nav id="bottom-pagination" class="page-navigation bottom-pagination" aria-label="Results pages at end of list" hidden>

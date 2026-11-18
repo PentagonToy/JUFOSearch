@@ -28,6 +28,8 @@ class JournalSearchTests(unittest.TestCase):
         self.assertEqual(server.keyword_topics("CFD, cfd, machine learning"),
                          {"computational fluid dynamics": "CFD", "machine learning": "machine learning"})
         self.assertEqual(server.keyword_topics("C&F"), {"c&f": "C&F"})
+        self.assertEqual(server.keyword_topics("ml, pasr"),
+                         {"machine learning": "ML", "partially stirred reactor": "pasr"})
 
     def test_keyword_matching_handles_hyphens_plurals_and_method_names(self):
         title = "Neural-network sub-grid-scale models for large-eddy simulations"
@@ -57,7 +59,7 @@ class JournalSearchTests(unittest.TestCase):
         flame = {"title": "TCI flow model", "doi": "10.1/flame", "keywords": ["CFD", "TCI"]}
         generic = {"title": "ML paper", "doi": "10.1/ml", "keywords": ["ML"]}
 
-        def articles(topic, keywords=None):
+        def articles(topic, keywords=None, minimum=1):
             if topic == "subgrid scale":
                 raise OSError("Unavailable")
             return [
@@ -72,7 +74,7 @@ class JournalSearchTests(unittest.TestCase):
         with (patch.object(server, "topic_works", side_effect=articles),
               patch.object(server, "find_venue", side_effect=venue)):
             rows, notices = server.search_keywords(topics)
-        self.assertEqual([row["jufo_id"] for row in rows], [1, 2])
+        self.assertEqual([row["jufo_id"] for row in rows], [1])
         self.assertEqual(rows[0]["matched_keywords"], ["CFD", "ML", "SGS", "TCI"])
         self.assertEqual(rows[0]["keyword_total"], 4)
         self.assertEqual(len(rows[0]["examples"]), 2)
@@ -82,6 +84,36 @@ class JournalSearchTests(unittest.TestCase):
         with patch.object(server, "topic_works", side_effect=OSError("Unavailable")):
             with self.assertRaises(OSError):
                 server.search_keywords(server.keyword_topics("CFD, ML"))
+
+    def test_combined_search_checks_abstracts_without_returning_their_text(self):
+        payload = {"message": {"items": [
+            {"DOI": "10.1/closure", "title": ["A data-driven <i>PaSR</i> closure"],
+             "abstract": "<jats:p>Neural networks improve partially stirred reactor models.</jats:p>",
+             "container-title": ["Combustion journal"], "ISSN": ["1234-5678"]},
+            {"DOI": "10.1/ml", "title": ["Machine learning for finance"],
+             "container-title": ["Finance journal"], "ISSN": ["1234-5679"]},
+        ]}}
+        topics = server.keyword_topics("ml, pasr")
+        with patch.object(server, "download", return_value=json.dumps(payload).encode()) as download:
+            venues = server.topic_works(" ".join(topics), keywords=topics, minimum=2)
+        parameters = parse_qs(urlsplit(download.call_args.args[0]).query)
+        self.assertIn("query.bibliographic", parameters)
+        self.assertIn("abstract", parameters["select"][0])
+        self.assertIn(f"from-pub-date:{datetime.now().year - 9}-01-01", parameters["filter"][0])
+        self.assertEqual(len(venues), 1)
+        work = venues[0]["works"]["10.1/closure"]
+        self.assertEqual(work["title"], "A data-driven PaSR closure")
+        self.assertEqual(work["keywords"], ["ML", "pasr"])
+        self.assertEqual(work["abstract_keywords"], ["ML"])
+        self.assertNotIn("abstract", work)
+
+    def test_keyword_search_queries_the_combination_before_individual_concepts(self):
+        topics = server.keyword_topics("ml, reactor")
+        with patch.object(server, "topic_works", return_value=[]) as lookup:
+            server.search_keywords(topics)
+        self.assertEqual([call.args[0] for call in lookup.call_args_list],
+                         ["machine learning reactor", "machine learning", "reactor"])
+        self.assertEqual(lookup.call_args_list[0].kwargs["minimum"], 2)
 
     def test_keyword_search_keeps_examples_for_less_frequent_keywords(self):
         works = {str(index): {"doi": str(index), "title": "Paper", "keywords": keywords}
@@ -94,12 +126,12 @@ class JournalSearchTests(unittest.TestCase):
         self.assertTrue(any("TCI" in work["keywords"] for work in rows[0]["examples"]))
 
     def test_keyword_search_stops_new_lookups_when_time_budget_expires(self):
-        with (patch.object(server.time, "monotonic", side_effect=[0, 1, 26]),
+        with (patch.object(server.time, "monotonic", side_effect=[0, 1, 26, 26]),
               patch.object(server, "topic_works", return_value=[]) as lookup):
             rows, notices = server.search_keywords(server.keyword_topics("CFD, ML"))
         self.assertEqual(rows, [])
         self.assertEqual(lookup.call_count, 1)
-        self.assertEqual(notices, ["ML article lookup unavailable."])
+        self.assertEqual(notices, ["CFD article lookup unavailable.", "ML article lookup unavailable."])
 
     def test_auto_routes_keyword_lists_and_preserves_comma_titles(self):
         handler = server.Handler.__new__(server.Handler)
