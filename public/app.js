@@ -253,8 +253,9 @@ function evaluationHistory(history, yearStart) {
       headers.append(header);
     }
     const body = table.createTBody();
-    for (const [year, level] of entries.slice().reverse()) {
+    for (const [index, [year, level]] of entries.slice().reverse().entries()) {
       const row = body.insertRow();
+      row.hidden = index >= 5;
       const yearCell = element("th", String(year));
       yearCell.scope = "row";
       row.append(yearCell);
@@ -262,7 +263,22 @@ function evaluationHistory(history, yearStart) {
         level === null ? "history-unrecorded" : level === 0 ? "history-level history-level-zero" : "history-level"));
     }
     const content = element("div", null, "history-content");
-    content.append(plot, table);
+    const record = element("div", null, "history-record");
+    record.append(table);
+    if (entries.length > 5) {
+      const toggle = element("button", "Show all years", "secondary");
+      toggle.type = "button";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.addEventListener("click", () => {
+        const expanded = toggle.getAttribute("aria-expanded") !== "true";
+        toggle.setAttribute("aria-expanded", String(expanded));
+        toggle.textContent = expanded ? "Show recent 5" : "Show all years";
+        for (const [index, row] of [...body.rows].entries()) row.hidden = !expanded && index >= 5;
+        content.classList.toggle("history-expanded", expanded);
+      });
+      record.append(toggle);
+    }
+    content.append(plot, record);
     details.append(content);
   });
   return details;
