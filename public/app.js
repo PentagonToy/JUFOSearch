@@ -5,10 +5,12 @@ const queryInput = document.querySelector("#query");
 const statusLine = document.querySelector("#status");
 const cards = document.querySelector("#cards");
 const notices = document.querySelector("#notices");
-const queryLabel = document.querySelector("#query-label");
 const filters = document.querySelector("#filters");
 const filterStatus = document.querySelector("#filter-status");
 const filterFields = [...filters.querySelectorAll(".facet")];
+const pagination = document.querySelector("#pagination");
+const bottomPagination = document.querySelector("#bottom-pagination");
+const pageSize = document.querySelector("#page-size");
 const agreementDialog = document.querySelector("#agreement-dialog");
 const agreementTitle = document.querySelector("#agreement-title");
 const agreementBody = document.querySelector("#agreement-body");
@@ -43,6 +45,12 @@ function sciFree(term) {
 
 function reported(value) {
   return value && value.toLowerCase() !== "unknown" ? value : null;
+}
+
+function publisherName(journal) {
+  const name = journal.publisher_name;
+  if (!name) return "Unknown publisher";
+  return /[?\uFFFD]/.test(name) ? "Publisher name incomplete" : name.normalize("NFC");
 }
 
 const oaIconPaths = {
@@ -112,7 +120,7 @@ function journalFacts(journal) {
     : agreement ? agreement.discount + "% APC discount" : "Check SciFree";
   return {
     level: journal.level == null ? "Unclassified" : String(journal.level),
-    publisher: journal.publisher_name || "Unknown publisher",
+    publisher: publisherName(journal),
     fee,
     licence: agreement?.licence || reported(journal.external?.license?.channel) || "See journal",
     model: oa?.is_diamondOA === true ? "Diamond OA"
@@ -156,46 +164,87 @@ function showAgreement(journal, sciFreeUrl) {
   agreementDialog.showModal();
 }
 
-function evaluationHistory(history) {
-  const entries = Object.entries(history || {})
-    .filter(([year]) => /^\d{4}$/.test(year))
-    .map(([year, level]) => [year, /^[0-3]$/.test(String(level)) ? Number(level) : null])
-    .sort(([a], [b]) => Number(b) - Number(a));
-  const details = element("details");
+function annualLevels(history, yearStart) {
+  const years = Object.keys(history || {}).filter(year => /^\d{4}$/.test(year)).map(Number).sort((a, b) => a - b);
+  if (!years.length) return [];
+  const first = /^\d{4}$/.test(String(yearStart)) ? Math.max(years[0], Number(yearStart)) : years[0];
+  const last = years.at(-1);
+  return Array.from({length: Math.max(0, last - first + 1)}, (_, index) => {
+    const year = first + index;
+    const value = history[year];
+    return [year, /^[0-3]$/.test(String(value)) ? Number(value) : null];
+  });
+}
+
+function historyTicks(entries) {
+  const first = entries[0][0];
+  const last = entries.at(-1)[0];
+  const step = last - first <= 12 ? 2 : 5;
+  const ticks = [first];
+  for (let year = Math.ceil(first / step) * step; year < last; year += step) {
+    if (year - first >= Math.min(step / 2, 2) && last - year >= Math.min(step / 2, 2)) ticks.push(year);
+  }
+  if (last > first) ticks.push(last);
+  return ticks;
+}
+
+function evaluationHistory(history, yearStart) {
+  const details = element("details", null, "evaluation-history");
   details.append(element("summary", "JUFO evaluation history"));
-  if (!entries.length) {
-    details.append(element("p", "JUFO has no recorded annual levels for this journal."));
-    return details;
-  }
-  const plot = element("div", null, "history-plot");
-  const chronological = entries.slice().reverse();
-  const x = index => 36 + index * 396 / Math.max(1, entries.length - 1);
-  const y = level => 112 - (level ?? 0) * 29;
-  const grid = [0, 1, 2, 3].map(level =>
-    `<path class="history-grid" d="M36 ${y(level)}H432"/><text x="14" y="${y(level) + 4}">${level}</text>`).join("");
-  const points = chronological.map(([, level], index) => x(index) + "," + y(level)).join(" ");
-  const markers = chronological.map(([year, level], index) =>
-    `<circle class="${level === null ? "history-missing" : "history-recorded"}" cx="${x(index)}" cy="${y(level)}" r="4"><title>${year} · ${level === null ? "No level recorded" : "Level " + level}</title></circle>`).join("");
-  plot.innerHTML = `<svg viewBox="0 0 456 148" role="img" aria-label="JUFO levels by year. See the table for exact values.">
-    ${grid}<polyline class="history-line" points="${points}"/>${markers}
-    <text x="36" y="137">${chronological[0][0]}</text>
-    ${entries.length > 1 ? `<text x="432" y="137" text-anchor="end">${entries[0][0]}</text>` : ""}
-  </svg>`;
-  plot.append(element("p", "Open circles at 0 indicate years without a recorded level."));
-  const table = element("table", null, "history-table");
-  const headers = table.createTHead().insertRow();
-  for (const label of ["Year", "JUFO level"]) {
-    const header = element("th", label);
-    header.scope = "col";
-    headers.append(header);
-  }
-  const body = table.createTBody();
-  for (const [year, level] of entries) {
-    const row = body.insertRow();
-    row.insertCell().textContent = year;
-    row.insertCell().textContent = level === null ? "No level recorded" : "Level " + level;
-  }
-  details.append(plot, table);
+  details.addEventListener("toggle", () => {
+    if (!details.open || details.childElementCount > 1) return;
+    const entries = annualLevels(history, yearStart);
+    if (!entries.length) {
+      details.append(element("p", "JUFO has no recorded annual levels for this journal."));
+      return;
+    }
+    const first = entries[0][0];
+    const last = entries.at(-1)[0];
+    const x = year => first === last ? 234 : 40 + (year - first) * 392 / (last - first);
+    const y = level => 116 - level * 30;
+    const grid = [0, 1, 2, 3].map(level =>
+      `<path class="history-grid" d="M40 ${y(level)}H432"/><text x="14" y="${y(level) + 5}">${level}</text>`).join("");
+    const path = entries.map(([year, level], index) => {
+      if (level === null) return "";
+      const command = index === 0 || entries[index - 1][1] === null ? "M" : "L";
+      return command + x(year) + " " + y(level);
+    }).join(" ");
+    const markers = entries.map(([year, level]) => level === null ? "" :
+      `<circle class="history-recorded" cx="${x(year)}" cy="${y(level)}" r="4"><title>${year} · Level ${level}</title></circle>`).join("");
+    const ticks = historyTicks(entries).map(year => {
+      const anchor = first === last ? "middle" : year === first ? "start" : year === last ? "end" : "middle";
+      return `<path class="history-grid" d="M${x(year)} 116v5"/><text x="${x(year)}" y="146" text-anchor="${anchor}">${year}</text>`;
+    }).join("");
+    const plot = element("figure", null, "history-plot");
+    plot.innerHTML = `<svg viewBox="0 0 456 160" role="img" aria-label="Annual JUFO levels from ${first} to ${last}. Missing years appear as gaps. Exact values are in the table.">
+      ${grid}<path class="history-line" d="${path}"/>${markers}${ticks}
+    </svg>`;
+    const caption = entries.some(([, level]) => level !== null)
+      ? "Gaps mean no level recorded. Level 0 appears only when reported by JUFO."
+      : "No JUFO levels have been recorded for this period.";
+    plot.append(element("figcaption", caption));
+
+    const table = element("table", null, "history-table");
+    table.append(element("caption", "Annual JUFO evaluation record", "sr-only"));
+    const headers = table.createTHead().insertRow();
+    for (const label of ["Year", "JUFO level"]) {
+      const header = element("th", label);
+      header.scope = "col";
+      headers.append(header);
+    }
+    const body = table.createTBody();
+    for (const [year, level] of entries.slice().reverse()) {
+      const row = body.insertRow();
+      const yearCell = element("th", String(year));
+      yearCell.scope = "row";
+      row.append(yearCell);
+      row.insertCell().append(element("span", level === null ? "Not recorded" : "Level " + level,
+        level === null ? "history-unrecorded" : level === 0 ? "history-level history-level-zero" : "history-level"));
+    }
+    const content = element("div", null, "history-content");
+    content.append(plot, table);
+    details.append(content);
+  });
   return details;
 }
 
@@ -217,7 +266,7 @@ function journalWebsite(journal) {
   return url.href;
 }
 
-function renderJournal(journal, topic) {
+function renderJournal(journal) {
   const agreement = journal.agreement;
   const oa = journal.external?.oa_info;
   const level = journal.level == null ? "Unclassified" : "Level " + journal.level;
@@ -238,7 +287,7 @@ function renderJournal(journal, topic) {
   const article = element("article", null, "card");
   article.append(
     heading,
-    element("p", [journal.publisher_name, identifiers.join(" / "),
+    element("p", [publisherName(journal), identifiers.join(" / "),
       journal.is_active === false ? "Inactive" : ""].filter(Boolean).join(" · "), "metadata")
   );
   const wosListed = journal.external?.index_info?.includes("WOS");
@@ -271,7 +320,7 @@ function renderJournal(journal, topic) {
     }
     evidence.append(list);
     article.append(evidence);
-  } else if (topic) {
+  } else if (journal.topic_match) {
     article.append(element("p", "Topic starting point", "evidence"));
   }
 
@@ -279,6 +328,9 @@ function renderJournal(journal, topic) {
   notes.append(element("summary", "Journal notes"));
   const fields = journal.okm_disciplines?.map(item => item.localized_labels?.en).filter(Boolean);
   notes.append(element("p", "JUFO ID " + journal.jufo_id + (fields?.length ? " · " + fields.join(" · ") : "")));
+  if (publisherName(journal) === "Publisher name incomplete") {
+    notes.append(element("p", "The publisher name in JUFO contains missing characters. Check the journal website for the full name."));
+  }
   if (oa?.immediate_sa_allowed_accepted === "yes") {
     const acceptedLicence = journal.external?.license?.sa_accepted;
     notes.append(element("p", "JUFO reports immediate self-archiving of the accepted manuscript"
@@ -289,7 +341,7 @@ function renderJournal(journal, topic) {
     indexing.append(link("Clarivate Master Journal List", "https://mjl.clarivate.com/"));
     notes.append(indexing);
   }
-  article.append(evaluationHistory(journal.level_history), notes);
+  article.append(evaluationHistory(journal.level_history, journal.year_start), notes);
   const sources = element("div", null, "sources");
   sources.append(link("Aalto SciFree", sciFreeUrl),
     link("JUFO record", "https://jufo-rest.csc.fi/v2.1/channel/" + journal.jufo_id));
@@ -297,11 +349,13 @@ function renderJournal(journal, topic) {
   return article;
 }
 
-function showResults(journals, topic) {
+function showResults(journals) {
   const rows = journals.map(journal => ({
     values: journalFacts(journal),
-    card: renderJournal(journal, topic),
+    journal,
   }));
+  let filteredRows = rows;
+  let page = 0;
   for (const field of filterFields) {
     const name = field.dataset.field;
     const present = new Set(rows.map(row => row.values[name]));
@@ -328,69 +382,82 @@ function showResults(journals, topic) {
       if (selected.length) active.push([field.dataset.field, selected]);
     }
 
-    let visible = 0;
-    for (const {values, card} of rows) {
-      card.hidden = active.some(([name, selected]) => !selected.includes(values[name]));
-      if (!card.hidden) visible++;
-    }
-    filterStatus.textContent = visible ? visible + " of " + rows.length + " shown"
-      : "No journals match these filters. Clear a filter to see more results.";
+    filteredRows = rows.filter(({values}) => !active.some(([name, selected]) => !selected.includes(values[name])));
+    page = 0;
     reset.disabled = !active.length;
+    renderPage();
+  }
+
+  function renderPage() {
+    const size = Number(pageSize.value);
+    const pages = Math.max(1, Math.ceil(filteredRows.length / size));
+    const start = page * size;
+    const end = Math.min(start + size, filteredRows.length);
+    cards.replaceChildren(...filteredRows.slice(start, end).map(({journal}) => renderJournal(journal)));
+    filterStatus.textContent = filteredRows.length ? `Showing ${start + 1}–${end} of ${filteredRows.length} ${filteredRows.length === 1 ? "journal" : "journals"}`
+      + (filteredRows.length !== rows.length ? ` · Filtered from ${rows.length}` : "")
+      : "No journals match these filters. Clear a filter to see more results.";
+    pagination.hidden = filteredRows.length <= 50;
+    bottomPagination.hidden = pages <= 1 || !filteredRows.length;
+    for (const label of document.querySelectorAll("[data-page-label]")) label.textContent = `Page ${page + 1} of ${pages}`;
+    for (const button of document.querySelectorAll("[data-page]")) {
+      const previous = button.dataset.page === "previous";
+      button.disabled = previous ? page === 0 : page === pages - 1;
+      button.onclick = () => {
+        page += previous ? -1 : 1;
+        renderPage();
+        pagination.querySelector("[data-page-label]").focus({preventScroll: true});
+        pagination.scrollIntoView({block: "start"});
+      };
+    }
   }
 
   const reset = document.querySelector("#reset-filters");
   filters.onchange = applyFilters;
+  pageSize.onchange = () => {
+    page = 0;
+    renderPage();
+  };
   reset.onclick = () => {
     for (const input of filters.querySelectorAll("input:checked")) input.checked = false;
     applyFilters();
     filterFields[0].querySelector("summary").focus();
   };
   filterStatus.hidden = rows.length === 0;
-  if (rows.length) applyFilters();
-  cards.replaceChildren(...rows.map(row => row.card));
+  applyFilters();
 }
 
-function setMode(mode) {
-  form.elements.mode.value = mode;
-  const label = mode === "topic" ? "Research topic" : "Journal title, ISSN or initials";
-  queryLabel.textContent = label;
-  queryInput.placeholder = label;
-}
-
-function topicButton(query) {
-  const button = element("button", "Search by research topic", "secondary");
-  button.type = "button";
-  button.addEventListener("click", () => {
-    setMode("topic");
-    search(query);
-  });
-  return button;
-}
-
-async function search(query) {
+async function search(query, mode = "auto") {
   activeSearch?.abort();
   const request = new AbortController();
   activeSearch = request;
-  const mode = form.elements.mode.value;
-  const params = new URLSearchParams({q: query});
-  if (mode === "topic") params.set("mode", mode);
+  const params = new URLSearchParams({q: query, mode, batch: "5"});
   queryInput.value = query;
-  history.replaceState(null, "", "?" + params);
+  const address = new URLSearchParams({q: query});
+  if (mode === "topic") address.set("mode", mode);
+  history.replaceState(null, "", "?" + address);
   cards.replaceChildren();
   filters.hidden = true;
+  pagination.hidden = true;
+  bottomPagination.hidden = true;
   filterStatus.hidden = true;
   notices.hidden = true;
-  statusLine.textContent = mode === "topic" ? "Finding journals that publish on this topic…" : "Searching journals…";
+  statusLine.textContent = "Searching…";
   try {
     const matches = new Map();
     const messages = new Set();
     let data;
+    let matchedTopic;
     do {
       const response = await fetch("/api/search?" + params, {signal: request.signal});
       data = await response.json();
       if (request.signal.aborted) return;
       if (!response.ok) throw new Error(data.error);
-      for (const journal of data.results) matches.set(journal.jufo_id, journal);
+      for (const journal of data.results) {
+        if (matches.get(journal.jufo_id)?.topic_match && !journal.topic_match) continue;
+        matches.set(journal.jufo_id, journal);
+      }
+      if (data.topic) matchedTopic = data.topic;
       for (const notice of data.notices) messages.add(notice);
       if (data.next_offset != null) {
         params.set("offset", data.next_offset);
@@ -399,9 +466,9 @@ async function search(query) {
     } while (data.next_offset != null);
     const journals = [...matches.values()];
     const count = journals.length;
-    if (data.topic) {
-      statusLine.textContent = count ? "Journals for “" + data.topic + "” · " + count + " found"
-        : "No journals found for “" + data.topic + "”. Try a shorter topic or a synonym.";
+    if (matchedTopic) {
+      statusLine.textContent = count ? "Journals for “" + matchedTopic + "” · " + count + " found"
+        : "No journals found for “" + matchedTopic + "”. Try a shorter topic or a synonym.";
     } else {
       statusLine.textContent = count ? count + (count === 1 ? " match" : " matches")
         : "No JUFO matches. Try the full journal title or an ISSN.";
@@ -414,21 +481,19 @@ async function search(query) {
     if (acronymCount > 1) {
       statusLine.textContent += " · " + acronymCount + " share these initials.";
     }
-    showResults(journals, data.topic);
-    if (!count && !data.topic) {
+    showResults(journals);
+    if (!count) {
       const actions = element("div", null, "sources");
-      if (!/^\d{4}-?\d{3}[0-9x]$/i.test(query)) actions.append(topicButton(query));
       actions.append(link("Search Aalto SciFree", sciFree(query)));
       cards.append(actions);
     }
   } catch (error) {
     if (request.signal.aborted) return;
     statusLine.textContent = error.message || "Search failed. Please try again.";
-    if (mode === "journal") cards.append(link("Search Aalto SciFree", sciFree(query)));
+    cards.append(link("Search Aalto SciFree", sciFree(query)));
   }
 }
 
-form.addEventListener("change", () => setMode(form.elements.mode.value));
 form.addEventListener("submit", event => {
   event.preventDefault();
   const query = queryInput.value.trim();
@@ -437,11 +502,11 @@ form.addEventListener("submit", event => {
 });
 document.querySelectorAll("[data-query]").forEach(button => {
   button.addEventListener("click", () => {
-    setMode("topic");
     search(button.dataset.query);
   });
 });
 const initialParams = new URLSearchParams(location.search);
 const initialQuery = initialParams.get("q");
-setMode(initialParams.get("mode") === "topic" ? "topic" : "journal");
-if (initialQuery?.trim().length >= 2 && initialQuery.length <= 160) search(initialQuery.trim());
+if (initialQuery?.trim().length >= 2 && initialQuery.length <= 160) {
+  search(initialQuery.trim(), initialParams.get("mode") === "topic" ? "topic" : "auto");
+}

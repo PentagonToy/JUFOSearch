@@ -19,14 +19,9 @@
       <h1 id="page-title">Find a journal</h1>
       <p class="lede">Look up a journal or discover where research on your topic is published.</p>
       <form id="search">
-        <fieldset class="modes">
-          <legend class="sr-only">Search by</legend>
-          <label><input type="radio" name="mode" value="journal" checked> Journal title or ISSN</label>
-          <label><input type="radio" name="mode" value="topic"> Research topic</label>
-        </fieldset>
         <div class="search-row">
-          <label for="query" id="query-label" class="sr-only">Journal title or ISSN</label>
-          <input id="query" type="search" name="q" placeholder="Journal title, ISSN or initials" minlength="2" maxlength="160" required>
+          <label for="query" class="sr-only">Journal title, ISSN, initials or research topic</label>
+          <input id="query" type="search" name="q" placeholder="Journal title, ISSN, initials or research topic" minlength="2" maxlength="160" required>
           <button class="primary" type="submit">Search</button>
         </div>
       </form>
@@ -50,7 +45,22 @@
         <button id="reset-filters" class="secondary" type="button">Clear filters</button>
       </fieldset>
       <p id="filter-status" role="status" hidden></p>
+      <div id="pagination" class="pagination" hidden>
+        <label class="page-size" for="page-size">Per page
+          <select id="page-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option></select>
+        </label>
+        <nav class="page-navigation" aria-label="Results pages">
+          <button type="button" class="secondary" data-page="previous">Previous</button>
+          <span data-page-label tabindex="-1"></span>
+          <button type="button" class="secondary" data-page="next">Next</button>
+        </nav>
+      </div>
       <div id="cards"></div>
+      <nav id="bottom-pagination" class="page-navigation bottom-pagination" aria-label="Results pages at end of list" hidden>
+        <button type="button" class="secondary" data-page="previous">Previous</button>
+        <span data-page-label></span>
+        <button type="button" class="secondary" data-page="next">Next</button>
+      </nav>
     </section>
     <footer>
       <a href="https://jfp.csc.fi/jufoportal" target="_blank" rel="noopener">JUFO Portal ↗</a>

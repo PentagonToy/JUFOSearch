@@ -1,6 +1,7 @@
 """Regression tests for journal search without upstream requests."""
 
 import json
+import io
 import unittest
 from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
@@ -10,6 +11,113 @@ import server
 
 
 class JournalSearchTests(unittest.TestCase):
+    def test_parallel_batches_preserve_every_record_at_page_boundaries(self):
+        for count in (0, 99, 100, 101, 400, 500, 501):
+            with self.subTest(count=count):
+                rows = [{"jufo_id": index, "title": f"Journal {index}"} for index in range(count)]
+
+                def lookup(query, size=100, offset=0):
+                    return rows[offset:offset + size]
+
+                with (patch.object(server, "search_journal", side_effect=lambda query, offset: lookup(query, offset=offset)),
+                      patch.object(server, "search_jufo", side_effect=lookup)):
+                    results, offset = server.search_journal_batch("Journal", pages=5)
+                    if offset is not None:
+                        remaining, end = server.search_journal_batch("Journal", offset=offset, pages=5)
+                        results.extend(remaining)
+                        self.assertIsNone(end)
+                    self.assertEqual(results, rows)
+
+    def test_batch_failure_is_reported_instead_of_losing_a_page(self):
+        with (patch.object(server, "search_journal", return_value=[{}] * 100),
+              patch.object(server, "search_jufo", side_effect=OSError("Unavailable"))):
+            with self.assertRaises(OSError):
+                server.search_journal_batch("Science", pages=5)
+
+    def test_topic_detection_preserves_titles_identifiers_and_initials(self):
+        cases = [
+            ("0045-7930", [], False),
+            ("Fuel", [{"title": "Fuel"}], False),
+            ("C&F", [{"title": "Computers and fluids", "matched_acronym": "C&F"}], False),
+            ("application in engineering combustion", [{"title": "Applications in energy and combustion science"}], False),
+            ("turbulent combustion", [{"title": "Combustion and flame"}], True),
+            ("ml", [{"title": "Machine learning"}], True),
+            ("cfd", [], True),
+            ("physcis", [], True),
+        ]
+        for query, rows, expected in cases:
+            with self.subTest(query=query):
+                self.assertEqual(server.needs_topic_search(query, rows), expected)
+
+    def test_auto_search_merges_topic_evidence_without_duplicates(self):
+        handler = server.Handler.__new__(server.Handler)
+        handler.path = "/api/search?q=ml&mode=auto&batch=5"
+        title = {"jufo_id": 1, "title": "Machine learning"}
+        related = [dict(title, examples=[{"doi": "10.1/example", "title": "Machine learning study"}]),
+                   {"jufo_id": 2, "title": "Neural networks"}]
+        with (patch.object(server, "search_journal_batch", return_value=([title], None)) as journals,
+              patch.object(server, "search_topic", return_value=(related, [])) as topics,
+              patch.object(server, "add_agreements"),
+              patch.object(handler, "send_json") as response):
+            handler.do_GET()
+            journals.assert_called_once_with("machine learning", 0, 5)
+            topics.assert_called_once_with("machine learning")
+            data = response.call_args.args[1]
+            self.assertEqual([row["jufo_id"] for row in data["results"]], [1, 2])
+            self.assertEqual(data["results"][0]["examples"], related[0]["examples"])
+            self.assertEqual(data["topic"], "machine learning")
+
+    def test_auto_search_retains_title_matches_when_crossref_fails(self):
+        handler = server.Handler.__new__(server.Handler)
+        handler.path = "/api/search?q=turbulent+combustion&mode=auto"
+        title = {"jufo_id": 1, "title": "Combustion and flame"}
+        with (patch.object(server, "search_journal_batch", return_value=([title], None)),
+              patch.object(server, "search_topic", side_effect=OSError("Unavailable")),
+              patch.object(server, "add_agreements"),
+              patch.object(handler, "send_json") as response):
+            handler.do_GET()
+            self.assertEqual(response.call_args.args[0], 200)
+            data = response.call_args.args[1]
+            self.assertEqual(data["results"][0]["jufo_id"], 1)
+            self.assertTrue(data["notices"])
+
+    def test_compact_result_retains_publishing_and_history_information(self):
+        row = {"jufo_id": 1, "title": "Journal", "country": {"id": "FI"}, "year_start": 2024,
+               "level_history": {"2026": "1"}, "agreement": {"discount": 15, "licence": "CC BY"},
+               "external": {"oa_info": {"is_diamondOA": True}, "license": {"channel": "CC BY"},
+                            "index_info": ["WOS"], "volume": 100}}
+        compact = server.compact_result(row)
+        self.assertEqual(compact["agreement"], row["agreement"])
+        self.assertEqual(compact["level_history"], row["level_history"])
+        self.assertEqual(compact["year_start"], 2024)
+        self.assertEqual(compact["external"]["oa_info"], row["external"]["oa_info"])
+        self.assertNotIn("country", compact)
+        self.assertNotIn("volume", compact["external"])
+
+    def test_success_is_cacheable_and_errors_are_not_cached(self):
+        handler = server.Handler.__new__(server.Handler)
+        handler.wfile = io.BytesIO()
+        with (patch.object(handler, "send_response"), patch.object(handler, "end_headers"),
+              patch.object(handler, "send_header") as header):
+            handler.send_json(200, {"results": []})
+            header.assert_any_call("Cache-Control", "public, max-age=0, s-maxage=300")
+            header.reset_mock()
+            handler.send_json(502, {"error": "Unavailable"})
+            header.assert_any_call("Cache-Control", "no-store")
+            header.reset_mock()
+            handler.send_json(200, {"results": [], "notices": ["Source temporarily unavailable"]})
+            header.assert_any_call("Cache-Control", "no-store")
+            header.reset_mock()
+            handler.send_json(200, {"results": [{"agreement_status": "unavailable"}], "notices": []})
+            header.assert_any_call("Cache-Control", "no-store")
+
+    def test_api_json_preserves_unicode_publisher_names(self):
+        handler = server.Handler.__new__(server.Handler)
+        with patch.object(handler, "respond") as response:
+            handler.send_json(200, {"publisher_name": "Şükrü Dursun · Éditions · Göteborg"})
+        body = response.call_args.args[2]
+        self.assertEqual(json.loads(body.decode("utf-8"))["publisher_name"], "Şükrü Dursun · Éditions · Göteborg")
+
     def test_title_search_ranks_exact_match_beyond_first_thirty(self):
         rows = [{"jufo_id": index, "title": f"Science journal {index}"} for index in range(40)]
         target = {"jufo_id": 100, "title": "Science", "is_active": True}

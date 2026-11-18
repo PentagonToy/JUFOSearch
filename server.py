@@ -40,6 +40,11 @@ TOPIC_DISCIPLINES = {
     "computational fluid dynamics": {"114", "214"},
 }
 ISSN_FIELDS = ("issn_electronic", "issn_print", "issnl")
+RESULT_FIELDS = (
+    "jufo_id", "title", "publisher_name", *ISSN_FIELDS, "website", "is_active",
+    "level", "level_history", "year_start", "okm_disciplines", "matched_acronym", "examples",
+    "topic_match", "agreement", "agreement_status",
+)
 LIST_URL = (
     "https://extra.kansalliskirjasto.fi/finelib_julkinen/lehtilistat/"
     "Elsevier/Freedom_publishing_title_list.xlsx"
@@ -267,6 +272,50 @@ def search_journal(query, offset=0):
     )[:30]
 
 
+def search_journal_batch(query, offset=0, pages=1):
+    rows = search_journal(query, offset)
+    if len(rows) < 100:
+        return rows, None
+    if pages == 1:
+        return rows, offset + 100
+
+    with ThreadPoolExecutor(max_workers=pages - 1) as pool:
+        batches = pool.map(
+            lambda start: search_jufo(normalise_journal_query(query), offset=start),
+            range(offset + 100, offset + pages * 100, 100),
+        )
+        for batch in batches:
+            rows.extend(batch)
+            if len(batch) < 100:
+                return rows, None
+
+    return rows, offset + pages * 100
+
+
+def needs_topic_search(query, rows):
+    if ISSN.fullmatch(normalise_journal_query(query)):
+        return False
+    if " ".join(query.casefold().split()) in TOPIC_ALIASES:
+        return True
+    if any(row.get("matched_acronym") or folded(row["title"]) == folded(query) for row in rows):
+        return False
+
+    terms = set(title_keywords(query))
+    if len(terms) < 2:
+        return not rows
+
+    return not any(len(terms.intersection(title_keywords(row["title"]))) >= max(2, len(terms) - 1)
+                   for row in rows)
+
+
+def compact_result(row):
+    result = {field: row[field] for field in RESULT_FIELDS if field in row}
+    external = row.get("external") or {}
+    result["external"] = {field: external[field] for field in ("oa_info", "license", "index_info")
+                          if field in external}
+    return result
+
+
 def journal_identifiers(row):
     return {row[field].replace("-", "").upper() for field in ISSN_FIELDS if row.get(field)}
 
@@ -388,17 +437,21 @@ def add_agreements(rows):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def respond(self, status, media, body):
+    def respond(self, status, media, body, cache="no-store"):
         self.send_response(status)
         self.send_header("Content-Type", f"{media}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
 
     def send_json(self, status, data):
-        self.respond(status, "application/json", json.dumps(data).encode())
+        cacheable = (status == 200 and not data.get("notices")
+                     and all(row.get("agreement_status") != "unavailable" for row in data.get("results", [])))
+        cache = "public, max-age=0, s-maxage=300" if cacheable else "no-store"
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
+        self.respond(status, "application/json", body, cache=cache)
 
     def do_GET(self):
         url = urlsplit(self.path)
@@ -413,6 +466,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             normalised = " ".join(query.casefold().split())
             topic = TOPIC_ALIASES.get(normalised, normalised)
+            mode = parameters.get("mode", ["journal"])[0]
             topic_mode = (parameters.get("mode") == ["topic"]
                           and not ISSN.fullmatch(normalise_journal_query(query)))
             offset_text = parameters.get("offset", ["0"])[0]
@@ -420,15 +474,41 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "Invalid search page. Start a new search."})
                 return
             offset = int(offset_text)
+            pages_text = parameters.get("batch", ["1"])[0]
+            if pages_text not in {"1", "5"}:
+                self.send_json(400, {"error": "Invalid search batch. Start a new search."})
+                return
+            pages = int(pages_text)
             try:
-                results, notices = search_topic(topic) if topic_mode else (search_journal(query, offset), [])
+                next_offset = None
+                notices = []
+                if topic_mode:
+                    results, notices = search_topic(topic)
+                    for row in results:
+                        row["topic_match"] = topic
+                else:
+                    title_query = topic if mode == "auto" and normalised in TOPIC_ALIASES else query
+                    results, next_offset = search_journal_batch(title_query, offset, pages)
+                    if mode == "auto" and not offset and needs_topic_search(query, results):
+                        try:
+                            related, notices = search_topic(topic)
+                        except (OSError, ValueError):
+                            if not results:
+                                raise
+                            notices.append("Related article search is temporarily unavailable. Showing title matches.")
+                        else:
+                            matches = {row["jufo_id"]: row for row in results}
+                            for row in related:
+                                matches[row["jufo_id"]] = dict(row, topic_match=topic)
+                            results = list(matches.values())
+                            topic_mode = True
                 add_agreements(results)
             except (OSError, ValueError):
                 service = "Topic search" if topic_mode else "JUFO"
                 self.send_json(502, {"error": f"{service} is temporarily unavailable. Try again shortly."})
             else:
-                self.send_json(200, {"results": results, "notices": notices,
-                                     "next_offset": offset + 100 if not topic_mode and len(results) == 100 else None,
+                self.send_json(200, {"results": [compact_result(row) for row in results], "notices": notices,
+                                     "next_offset": next_offset,
                                      "topic": topic if topic_mode else None})
         else:
             self.send_error(404)
