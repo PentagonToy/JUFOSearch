@@ -17,7 +17,6 @@
   <main class="wrap">
     <section class="hero" aria-labelledby="page-title">
       <h1 id="page-title">Find a journal</h1>
-      <p class="lede">Look up a journal or discover where research on your topic is published.</p>
       <form id="search">
         <div class="search-row">
           <label for="query" class="sr-only">Journal title, ISSN, initials or research topic</label>
@@ -26,14 +25,13 @@
         </div>
       </form>
       <div class="examples">
-        <span>Explore a topic</span>
         <button type="button" data-query="physics">Physics</button>
         <button type="button" data-query="ml">Machine learning</button>
         <button type="button" data-query="cfd">CFD</button>
       </div>
     </section>
     <section class="results" aria-label="Search results">
-      <p id="status" role="status" aria-live="polite">Results include JUFO classification, publishing fees and licence information.</p>
+      <p id="status" role="status" aria-live="polite"></p>
       <p id="notices" role="status" hidden></p>
       <fieldset id="filters" class="filters" hidden>
         <legend class="sr-only">Filter results</legend>

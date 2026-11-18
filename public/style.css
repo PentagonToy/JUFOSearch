@@ -24,7 +24,6 @@ button { cursor: pointer; }
 .policy, footer, .sources { font-size: .85rem; }
 .hero { padding: clamp(1.5rem, 4vw, 3rem) 0 2.15rem; }
 h1 { font-size: 2.75rem; line-height: 1; letter-spacing: -.04em; margin: .55rem 0 .8rem; }
-.lede { font-size: 1.05rem; color: var(--muted); margin: 0 0 1.5rem; }
 form { max-width: 100%; }
 .search-row { display: flex; gap: .6rem; }
 input[type="search"] { min-width: 0; flex: 1; padding: .9rem 1rem; border-radius: 10px; border: 1px solid #a6b5aa; background: white; color: inherit; }
@@ -119,9 +118,14 @@ dialog::backdrop { background: rgb(15 30 24 / 55%); }
 .history-plot { min-width: 0; margin: 0; }
 .history-plot svg { display: block; width: 100%; font-size: 14px; fill: var(--muted); }
 .history-plot figcaption { font-size: .8rem; color: var(--muted); line-height: 1.5; margin-top: .5rem; max-width: 48ch; }
+.history-legend { display: flex; flex-wrap: wrap; gap: .5rem 1rem; }
+.history-key { display: inline-flex; align-items: center; gap: .4rem; }
+.history-key svg { width: 2rem; height: .85rem; flex: none; overflow: visible; }
 .history-grid { stroke: var(--line); }
 .history-line { fill: none; stroke: var(--green); stroke-width: 2; }
+.history-line-unrecorded { stroke: var(--muted); stroke-dasharray: 5 5; }
 .history-recorded { fill: var(--green); }
+.history-missing { fill: var(--surface); stroke: var(--muted); stroke-width: 2; }
 @media (max-width: 800px) {
   .history-content { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
 }

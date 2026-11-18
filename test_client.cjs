@@ -35,6 +35,15 @@ test("unknown publication dates preserve recorded history", () => {
   assert.deepEqual(value('annualLevels({}, 2024)'), []);
 });
 
+test("missing years use dashed baseline links and real zero levels stay recorded", () => {
+  assert.deepEqual(value('historySegments([[2024, null], [2025, null], [2026, 1], [2027, 0]])'), [
+    {from: [2024, 0], to: [2025, 0], missing: true},
+    {from: [2025, 0], to: [2026, 1], missing: true},
+    {from: [2026, 1], to: [2027, 0], missing: false},
+  ]);
+  assert.deepEqual(value('historySegments([[2024, 1]])'), []);
+});
+
 test("ticks include endpoints and readable two- or five-year intervals", () => {
   assert.deepEqual(value('historyTicks(annualLevels({2020: 1, 2026: 1}, 2020))'), [2020, 2022, 2024, 2026]);
   assert.deepEqual(value('historyTicks(annualLevels({2012: 1, 2026: 1}, 2012))'), [2012, 2015, 2020, 2026]);

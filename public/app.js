@@ -140,19 +140,19 @@ function showAgreement(journal, sciFreeUrl) {
   if (agreement) {
     const expiry = new Intl.DateTimeFormat("en-GB", {dateStyle: "long", timeZone: "UTC"});
     field("Agreement expires", expiry.format(new Date(agreement.until)));
-    field("Who qualifies", "The submitting corresponding author must be affiliated with Aalto University, select Aalto University as their affiliation and use their Aalto email.");
+    field("Who qualifies", "Submitting corresponding author at Aalto, using Aalto affiliation and email.");
     field("Eligible article types", agreement.article_types);
     field("Quota", agreement.quota);
     field("Agreement licence", agreement.licence);
     if (agreement.discount < 100) {
-      field("Remaining fee", "The publisher invoices the remaining APC. Confirm funding with your department before submitting.");
+      field("Remaining fee", "Publisher invoices the remaining APC. Confirm department funding before submission.");
     }
     field(agreement.source ? "Title list checked" : "SciFree status recorded", agreement.checked);
   } else {
     const messages = {
-      expired: "The agreement data for this journal is outside its recorded period. Check SciFree for current terms.",
-      unavailable: "The FinELib title list could not be loaded. Check SciFree for current support.",
-      unverified: "Check Aalto SciFree for title-level coverage, licence options and quotas."
+      expired: "Check current agreement dates in SciFree.",
+      unavailable: "Title list unavailable. Check SciFree.",
+      unverified: "Check SciFree for coverage, licences and quotas."
     };
     field("Coverage", messages[status] || messages.unverified);
   }
@@ -188,6 +188,17 @@ function historyTicks(entries) {
   return ticks;
 }
 
+function historySegments(entries) {
+  return entries.slice(1).map(([year, level], index) => {
+    const [previousYear, previousLevel] = entries[index];
+    return {
+      from: [previousYear, previousLevel ?? 0],
+      to: [year, level ?? 0],
+      missing: previousLevel === null || level === null,
+    };
+  });
+}
+
 function evaluationHistory(history, yearStart) {
   const details = element("details", null, "evaluation-history");
   details.append(element("summary", "JUFO evaluation history"));
@@ -195,7 +206,7 @@ function evaluationHistory(history, yearStart) {
     if (!details.open || details.childElementCount > 1) return;
     const entries = annualLevels(history, yearStart);
     if (!entries.length) {
-      details.append(element("p", "JUFO has no recorded annual levels for this journal."));
+      details.append(element("p", "No annual JUFO levels recorded."));
       return;
     }
     const first = entries[0][0];
@@ -204,25 +215,34 @@ function evaluationHistory(history, yearStart) {
     const y = level => 116 - level * 30;
     const grid = [0, 1, 2, 3].map(level =>
       `<path class="history-grid" d="M40 ${y(level)}H432"/><text x="14" y="${y(level) + 5}">${level}</text>`).join("");
-    const path = entries.map(([year, level], index) => {
-      if (level === null) return "";
-      const command = index === 0 || entries[index - 1][1] === null ? "M" : "L";
-      return command + x(year) + " " + y(level);
+    const lines = historySegments(entries).map(({from, to, missing}) => {
+      const className = missing ? "history-line history-line-unrecorded" : "history-line";
+      return `<path class="${className}" d="M${x(from[0])} ${y(from[1])}L${x(to[0])} ${y(to[1])}"/>`;
     }).join(" ");
-    const markers = entries.map(([year, level]) => level === null ? "" :
-      `<circle class="history-recorded" cx="${x(year)}" cy="${y(level)}" r="4"><title>${year} · Level ${level}</title></circle>`).join("");
+    const markers = entries.map(([year, level]) => {
+      const className = level === null ? "history-missing" : "history-recorded";
+      const label = level === null ? "Not recorded (shown at baseline)" : "Level " + level;
+      return `<circle class="${className}" cx="${x(year)}" cy="${y(level ?? 0)}" r="4"><title>${year} · ${label}</title></circle>`;
+    }).join("");
     const ticks = historyTicks(entries).map(year => {
       const anchor = first === last ? "middle" : year === first ? "start" : year === last ? "end" : "middle";
       return `<path class="history-grid" d="M${x(year)} 116v5"/><text x="${x(year)}" y="146" text-anchor="${anchor}">${year}</text>`;
     }).join("");
     const plot = element("figure", null, "history-plot");
-    plot.innerHTML = `<svg viewBox="0 0 456 160" role="img" aria-label="Annual JUFO levels from ${first} to ${last}. Missing years appear as gaps. Exact values are in the table.">
-      ${grid}<path class="history-line" d="${path}"/>${markers}${ticks}
+    plot.innerHTML = `<svg viewBox="0 0 456 160" role="img" aria-label="Annual JUFO levels from ${first} to ${last}. Open circles at 0 and dashed links indicate missing records. Filled circles show recorded levels. Exact values are in the table.">
+      ${grid}${lines}${markers}${ticks}
     </svg>`;
-    const caption = entries.some(([, level]) => level !== null)
-      ? "Gaps mean no level recorded. Level 0 appears only when reported by JUFO."
-      : "No JUFO levels have been recorded for this period.";
-    plot.append(element("figcaption", caption));
+    const legend = element("figcaption", null, "history-legend");
+    for (const [label, missing] of [["Recorded", false], ["Not recorded", true]]) {
+      const key = element("span", null, "history-key");
+      key.innerHTML = `<svg viewBox="0 0 32 12" aria-hidden="true">
+        <path class="history-line${missing ? " history-line-unrecorded" : ""}" d="M1 6H31"/>
+        <circle class="${missing ? "history-missing" : "history-recorded"}" cx="16" cy="6" r="3.5"/>
+      </svg>`;
+      key.append(element("span", label));
+      legend.append(key);
+    }
+    plot.append(legend);
 
     const table = element("table", null, "history-table");
     table.append(element("caption", "Annual JUFO evaluation record", "sr-only"));
@@ -305,10 +325,6 @@ function renderJournal(journal) {
   );
   article.append(facts);
 
-  if (journal.matched_acronym) {
-    article.append(element("p", "Matches initials " + journal.matched_acronym, "evidence"));
-  }
-
   if (journal.examples?.length) {
     const evidence = element("div", null, "evidence");
     evidence.append(element("p", "Matching articles · Crossref"));
@@ -329,7 +345,7 @@ function renderJournal(journal) {
   const fields = journal.okm_disciplines?.map(item => item.localized_labels?.en).filter(Boolean);
   notes.append(element("p", "JUFO ID " + journal.jufo_id + (fields?.length ? " · " + fields.join(" · ") : "")));
   if (publisherName(journal) === "Publisher name incomplete") {
-    notes.append(element("p", "The publisher name in JUFO contains missing characters. Check the journal website for the full name."));
+    notes.append(element("p", "JUFO publisher name incomplete. Verify on the journal website."));
   }
   if (oa?.immediate_sa_allowed_accepted === "yes") {
     const acceptedLicence = journal.external?.license?.sa_accepted;
@@ -337,7 +353,7 @@ function renderJournal(journal) {
       + (acceptedLicence ? " under " + acceptedLicence : "") + "."));
   }
   if (wosListed) {
-    const indexing = element("p", "JUFO lists Web of Science indexing. Check current coverage by ISSN in the ");
+    const indexing = element("p", "Web of Science listed in JUFO. Verify by ISSN in ");
     indexing.append(link("Clarivate Master Journal List", "https://mjl.clarivate.com/"));
     notes.append(indexing);
   }
@@ -396,7 +412,7 @@ function showResults(journals) {
     cards.replaceChildren(...filteredRows.slice(start, end).map(({journal}) => renderJournal(journal)));
     filterStatus.textContent = filteredRows.length ? `Showing ${start + 1}–${end} of ${filteredRows.length} ${filteredRows.length === 1 ? "journal" : "journals"}`
       + (filteredRows.length !== rows.length ? ` · Filtered from ${rows.length}` : "")
-      : "No journals match these filters. Clear a filter to see more results.";
+      : "No matches. Clear a filter.";
     pagination.hidden = filteredRows.length <= 50;
     bottomPagination.hidden = pages <= 1 || !filteredRows.length;
     for (const label of document.querySelectorAll("[data-page-label]")) label.textContent = `Page ${page + 1} of ${pages}`;
@@ -461,7 +477,7 @@ async function search(query, mode = "auto") {
       for (const notice of data.notices) messages.add(notice);
       if (data.next_offset != null) {
         params.set("offset", data.next_offset);
-        statusLine.textContent = "Searching journals… " + matches.size + " found so far";
+        statusLine.textContent = "Searching… " + matches.size + " found";
       }
     } while (data.next_offset != null);
     const journals = [...matches.values()];
