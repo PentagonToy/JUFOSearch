@@ -297,14 +297,12 @@ function renderJournal(journal, topic) {
   return article;
 }
 
-function showResults(journals, topic, preserveFilters = false) {
+function showResults(journals, topic) {
   const rows = journals.map(journal => ({
     values: journalFacts(journal),
     card: renderJournal(journal, topic),
   }));
   for (const field of filterFields) {
-    const selected = preserveFilters
-      ? [...field.querySelectorAll("input:checked")].map(input => input.value) : [];
     const name = field.dataset.field;
     const present = new Set(rows.map(row => row.values[name]));
     const values = name === "level"
@@ -316,7 +314,6 @@ function showResults(journals, topic, preserveFilters = false) {
       const checkbox = element("input");
       checkbox.type = "checkbox";
       checkbox.value = value;
-      checkbox.checked = selected.includes(value);
       label.append(checkbox, element("span", value));
       return label;
     }));
@@ -370,57 +367,54 @@ function topicButton(query) {
   return button;
 }
 
-async function search(query, offset = 0, previous = [], mode = form.elements.mode.value) {
+async function search(query) {
   activeSearch?.abort();
   const request = new AbortController();
   activeSearch = request;
+  const mode = form.elements.mode.value;
   const params = new URLSearchParams({q: query});
   if (mode === "topic") params.set("mode", mode);
   queryInput.value = query;
   history.replaceState(null, "", "?" + params);
-  if (offset) params.set("offset", offset);
-  if (!offset) {
-    cards.replaceChildren();
-    filters.hidden = true;
-    filterStatus.hidden = true;
-  }
+  cards.replaceChildren();
+  filters.hidden = true;
+  filterStatus.hidden = true;
   notices.hidden = true;
   statusLine.textContent = mode === "topic" ? "Finding journals that publish on this topic…" : "Searching journals…";
   try {
-    const response = await fetch("/api/search?" + params, {signal: request.signal});
-    const data = await response.json();
-    if (request.signal.aborted) return;
-    if (!response.ok) throw new Error(data.error);
-    const journals = [...new Map([...previous, ...data.results]
-      .map(journal => [journal.jufo_id, journal])).values()];
+    const matches = new Map();
+    const messages = new Set();
+    let data;
+    do {
+      const response = await fetch("/api/search?" + params, {signal: request.signal});
+      data = await response.json();
+      if (request.signal.aborted) return;
+      if (!response.ok) throw new Error(data.error);
+      for (const journal of data.results) matches.set(journal.jufo_id, journal);
+      for (const notice of data.notices) messages.add(notice);
+      if (data.next_offset != null) {
+        params.set("offset", data.next_offset);
+        statusLine.textContent = "Searching journals… " + matches.size + " found so far";
+      }
+    } while (data.next_offset != null);
+    const journals = [...matches.values()];
     const count = journals.length;
     if (data.topic) {
       statusLine.textContent = count ? "Journals for “" + data.topic + "” · " + count + " found"
         : "No journals found for “" + data.topic + "”. Try a shorter topic or a synonym.";
     } else {
       statusLine.textContent = count ? count + (count === 1 ? " match" : " matches")
-        + (data.next_offset != null ? " · More available" : "")
         : "No JUFO matches. Try the full journal title or an ISSN.";
     }
-    if (data.notices.length) {
-      notices.textContent = data.notices.join(" ");
+    if (messages.size) {
+      notices.textContent = [...messages].join(" ");
       notices.hidden = false;
     }
     const acronymCount = journals.filter(journal => journal.matched_acronym).length;
     if (acronymCount > 1) {
       statusLine.textContent += " · " + acronymCount + " share these initials.";
     }
-    showResults(journals, data.topic, offset > 0);
-    if (data.next_offset != null) {
-      const more = element("button", "Load more journals", "secondary");
-      more.type = "button";
-      more.addEventListener("click", async () => {
-        more.disabled = true;
-        await search(query, data.next_offset, journals, mode);
-        more.disabled = false;
-      });
-      cards.append(more);
-    }
+    showResults(journals, data.topic);
     if (!count && !data.topic) {
       const actions = element("div", null, "sources");
       if (!/^\d{4}-?\d{3}[0-9x]$/i.test(query)) actions.append(topicButton(query));
