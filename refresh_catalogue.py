@@ -48,9 +48,9 @@ def write_manifest(counts, checked):
     if manifest_path.exists():
         counts = {**json.loads(manifest_path.read_text())["counts"], **counts}
     files = {}
-    for path in sorted(TARGET.glob("*.json.gz")):
+    for path in sorted([*TARGET.glob("*.json.gz"), *TARGET.glob("*.sqlite3")]):
         payload = path.read_bytes()
-        files[path.name.removesuffix(".json.gz")] = {"bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        files[path.name.removesuffix(".json.gz")] = {"filename": path.name, "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
     manifest = {"checked": checked, "counts": counts, "files": files,
                 "sources": [JUFO, BULK, "https://api.openalex.org", LIST_URL]}
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -135,6 +135,8 @@ def main():
     write_snapshot("agreements.json.gz", {"checked": today, "titles": {
         key: sorted(values) for key, values in titles.items()}})
     write_manifest({"jufo_series": len(journals), "openalex_sources": len(profiles), "topics": len(topics)}, today)
+    from prepare_search import prepare
+    prepare()
 
 
 if __name__ == "__main__":

@@ -244,6 +244,34 @@ function journalFacts(journal) {
   };
 }
 
+function listedAPC(journal) {
+  const values = (journal.apc?.prices || []).filter(row => typeof row.amount === "number"
+    && Number.isFinite(row.amount) && row.amount >= 0 && /^[A-Z]{3}$/.test(row.currency));
+  const price = values.find(row => row.currency === "EUR") || values.find(row => row.currency === "USD") || values[0];
+  if (!price) return null;
+  return price.currency + " " + new Intl.NumberFormat("en", {maximumFractionDigits: 2}).format(price.amount);
+}
+
+function priceLink(journal) {
+  const text = listedAPC(journal);
+  if (!text) return element("span", "APC not listed");
+  const anchor = link(text, journal.apc.source);
+  anchor.textContent = text.replace(" ", "\u00a0");
+  const note = "OpenAlex snapshot " + journal.apc.snapshot_date + ". List price; confirm current charges and taxes with the publisher.";
+  anchor.title = note;
+  anchor.setAttribute("aria-label", "Listed APC " + text + ". " + note);
+  return anchor;
+}
+
+function selectedFilters() {
+  return filterFields.map(field => [field.dataset.field,
+    [...field.querySelectorAll("input:checked")].map(input => input.value)]).filter(([, values]) => values.length);
+}
+
+function passesFilters(values, active) {
+  return active.every(([name, selected]) => selected.includes(values[name]));
+}
+
 function showAgreement(journal, sciFreeUrl) {
   const {agreement, agreement_status: status} = journal;
   agreementTitle.textContent = journal.title;
@@ -462,7 +490,7 @@ function quartileDetails(data) {
   return section;
 }
 
-function renderJournal(journal) {
+function renderJournal(journal, signal) {
   const agreement = journal.agreement;
   const oa = journal.external?.oa_info;
   const level = journal.level == null ? "Unclassified" : "Level " + journal.level;
@@ -491,10 +519,14 @@ function renderJournal(journal) {
   );
   const wosListed = journal.external?.index_info?.includes("WOS");
   const facts = element("dl", null, "facts");
+  const support = fact("Aalto APC support", feeButton, agreement?.source ? "FinELib agreement"
+    : agreement ? "Aalto SciFree" : null, feeTone);
+  const price = element("small");
+  price.append(priceLink(journal));
+  support.append(price);
   facts.append(
     fact("JUFO level", level, null, "rank-panel rank-" + rankTier(journal.level)),
-    fact("Aalto APC support", feeButton, agreement?.source ? "FinELib agreement"
-      : agreement ? "Aalto SciFree" : null, feeTone),
+    support,
     fact(agreement?.licence ? "Agreement licence" : "Journal licence", licence,
       agreement?.licence ? "Aalto agreement" : null),
     fact("Publishing model", oaLabel(model, model === "Hybrid OA" ? "hybrid" : ["Gold OA", "Diamond OA"].includes(model) ? "lock" : "info", modelInfo.source),
@@ -515,12 +547,11 @@ function renderJournal(journal) {
       for (const work of journal.examples) {
         const item = element("li");
         item.append(link(work.title, "https://doi.org/" + encodeURI(work.doi)));
-        if (work.keywords?.length) item.append(element("small", work.keywords.join(" · ")
-          + (work.abstract_keywords?.length ? " · Includes abstract matches" : "")));
+        if (work.keywords?.length) item.append(element("small", work.keywords.join(" · ")));
         item.append(articleAccess(work.doi));
         list.append(item);
       }
-      evidence.append(element("p", "Crossref · Article titles and available abstracts"), list);
+      evidence.append(element("p", "Crossref · Article titles"), list);
     });
     article.append(evidence);
   } else if (journal.matched_topics?.length) {
@@ -541,6 +572,8 @@ function renderJournal(journal) {
   const fields = journal.okm_disciplines?.map(item => item.localized_labels?.en).filter(Boolean);
   notes.append(element("p", "JUFO ID " + journal.jufo_id + (fields?.length ? " · " + fields.join(" · ") : "")));
   if (modelInfo.source?.source) notes.append(link("Publishing model source", modelInfo.source.source));
+  if (journal.apc) notes.append(element("p", "APC list-price snapshot · " + journal.apc.snapshot_date
+    + ". Discounts, taxes, article type and eligibility can change the payable amount."));
   if (publisherName(journal) === "Publisher name incomplete") {
     notes.append(element("p", "JUFO publisher name incomplete. Verify on the journal website."));
   }
@@ -554,14 +587,98 @@ function renderJournal(journal) {
     indexing.append(link("Clarivate Master Journal List", "https://mjl.clarivate.com/"));
     notes.append(indexing);
   }
-  article.append(evaluationHistory(journal.level_history, journal.year_start), quartileDetails(journal.quartiles), notes);
+  article.append(evaluationHistory(journal.level_history, journal.year_start), quartileDetails(journal.quartiles),
+    notes, similarJournals(journal, signal));
   const sources = element("div", null, "sources");
   sources.append(link("JUFO record", "https://jufo-rest.csc.fi/v2.1/channel/" + journal.jufo_id));
   article.append(sources);
   return article;
 }
 
-function showResults(journals) {
+function similarJournals(journal, signal) {
+  const section = element("details", null, "similar");
+  section.append(element("summary", "Similar journals"));
+  const status = element("p", "Finding similar journals…", "metadata");
+  status.setAttribute("role", "status");
+  let loaded = false, pending = false;
+  const load = async () => {
+    if (pending) return;
+    pending = true;
+    section.querySelector(".peer-retry")?.remove();
+    status.textContent = "Finding similar journals…";
+    section.append(status);
+    try {
+      const response = await fetch("/api/recommend?" + new URLSearchParams({id: journal.jufo_id}), {signal});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error);
+      if (signal.aborted) return;
+      loaded = true;
+      const active = selectedFilters();
+      const peers = data.results.filter(row => passesFilters(journalFacts(row), active));
+      if (!peers.length) {
+        status.textContent = data.notices[0] || (active.length ? "No suggestions match the current filters." : "No comparable journals found.");
+        return;
+      }
+      const list = element("div", null, "peer-list");
+      const append = rows => {
+        for (const row of rows) {
+          const card = element("article", null, "peer");
+          const heading = element("h3");
+          const anchor = element("a", row.title);
+          anchor.href = "/?" + new URLSearchParams({q: row.issn_electronic || row.issn_print || row.title});
+          heading.append(anchor);
+          const ranks = element("div", null, "peer-ranks");
+          ranks.append(rankBadge("JUFO " + row.level, row.level));
+          const values = row.quartiles.fields.map(field => field.quartile);
+          const first = Math.min(...values), last = Math.max(...values);
+          ranks.append(element("span", "OpenAlex Q" + first + (last > first ? "–Q" + last : "")));
+          const fees = element("p", null, "peer-fees");
+          fees.append(priceLink(row), " · ");
+          if (row.agreement) {
+            const value = journalFacts(row).fee;
+            const support = element("button", "Aalto " + value.toLowerCase(), "text-button");
+            support.type = "button";
+            support.addEventListener("click", () => showAgreement(row, sciFree(row.title)));
+            fees.append(support);
+          } else fees.append(link("Check Aalto support", sciFree(row.title)));
+          card.append(heading, ranks, fees, element("p", row.recommendation_reason));
+          list.append(card);
+        }
+      };
+      append(peers.slice(0, 6));
+      status.remove();
+      section.append(element("p", "JUFO · OpenAlex", "metadata"), list);
+      if (peers.length > 6) {
+        const more = element("button", "Show " + (peers.length - 6) + " more", "secondary");
+        more.type = "button";
+        more.setAttribute("aria-expanded", "false");
+        let expanded = false;
+        more.addEventListener("click", () => {
+          expanded = !expanded;
+          if (expanded) append(peers.slice(6, 12));
+          else for (const card of [...list.children].slice(6)) card.remove();
+          more.textContent = expanded ? "Show fewer" : "Show " + (peers.length - 6) + " more";
+          more.setAttribute("aria-expanded", String(expanded));
+          if (expanded) list.children[6].querySelector("h3 a").focus({preventScroll: true});
+        });
+        section.append(more);
+      }
+    } catch (error) {
+      if (signal.aborted) return;
+      status.textContent = "Similar journals unavailable.";
+      const retry = element("button", "Try again", "text-button peer-retry");
+      retry.type = "button";
+      retry.onclick = () => { retry.remove(); status.textContent = "Finding similar journals…"; load(); };
+      section.append(retry);
+    } finally {
+      pending = false;
+    }
+  };
+  section.addEventListener("toggle", () => { if (section.open && !loaded) load(); });
+  return section;
+}
+
+function showResults(journals, signal) {
   const rows = journals.map(journal => ({
     values: journalFacts(journal),
     journal,
@@ -595,7 +712,7 @@ function showResults(journals) {
       if (selected.length) active.push([field.dataset.field, selected]);
     }
 
-    filteredRows = rows.filter(({values}) => !active.some(([name, selected]) => !selected.includes(values[name])));
+    filteredRows = rows.filter(({values}) => passesFilters(values, active));
     page = 0;
     reset.hidden = !active.length;
     renderPage();
@@ -606,7 +723,7 @@ function showResults(journals) {
     const pages = Math.max(1, Math.ceil(filteredRows.length / size));
     const start = page * size;
     const end = Math.min(start + size, filteredRows.length);
-    cards.replaceChildren(...filteredRows.slice(start, end).map(({journal}) => renderJournal(journal)));
+    cards.replaceChildren(...filteredRows.slice(start, end).map(({journal}) => renderJournal(journal, signal)));
     filterStatus.textContent = filteredRows.length ? (pages > 1 ? `${start + 1}–${end} of ` : "")
       + `${filteredRows.length} ${filteredRows.length === 1 ? "journal" : "journals"}`
       + (filteredRows.length !== rows.length ? ` · Filtered from ${rows.length}` : "")
@@ -642,6 +759,34 @@ function showResults(journals) {
   applyFilters();
 }
 
+async function loadSearchPages(params, readPage, progress = () => {}) {
+  const first = await readPage(params);
+  const pages = [first];
+  if (first.next_offset == null) return pages;
+  if (Number.isInteger(first.total) && first.total <= 100000 && first.next_offset === 1000) {
+    const offsets = [];
+    for (let offset = 1000; offset < first.total; offset += 1000) offsets.push(offset);
+    let next = 0, completed = first.results.length;
+    await Promise.all(Array.from({length: Math.min(3, offsets.length)}, async () => {
+      while (next < offsets.length) {
+        const index = next++;
+        const page = new URLSearchParams(params);
+        page.set("offset", offsets[index]);
+        pages[index + 1] = await readPage(page);
+        completed += pages[index + 1].results.length;
+        progress(completed);
+      }
+    }));
+  } else {
+    while (pages.at(-1).next_offset != null) {
+      const page = new URLSearchParams(params);
+      page.set("offset", pages.at(-1).next_offset);
+      pages.push(await readPage(page));
+    }
+  }
+  return pages;
+}
+
 async function search(query, mode = "fast") {
   document.querySelector("#welcome").hidden = true;
   recentSearches = recentQueries([query, ...recentSearches]);
@@ -674,19 +819,22 @@ async function search(query, mode = "fast") {
     const messages = new Set();
     let data;
     let matchedTopic;
-    do {
-      const cacheKey = params.toString();
+    const pages = await loadSearchPages(params, async page => {
+      const cacheKey = page.toString();
       const cached = searchCache.get(cacheKey);
-      data = cached?.expires > Date.now() ? cached.data : null;
-      if (!data) {
-        const response = await fetch("/api/search?" + params, {signal: request.signal});
-        data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Search failed. Please try again.");
-        if (!data.notices?.length && mode !== "articles") {
-          searchCache.set(cacheKey, {data, expires: Date.now() + 300000});
+      let pageData = cached?.expires > Date.now() ? cached.data : null;
+      if (!pageData) {
+        const response = await fetch("/api/search?" + page, {signal: request.signal});
+        pageData = await response.json();
+        if (!response.ok) throw new Error(pageData.error || "Search failed. Please try again.");
+        if (!pageData.notices?.length && mode !== "articles") {
+          searchCache.set(cacheKey, {data: pageData, expires: Date.now() + 300000});
           if (searchCache.size > 10) searchCache.delete(searchCache.keys().next().value);
         }
       }
+      return pageData;
+    }, count => { if (!request.signal.aborted) statusLine.textContent = "Searching… " + count + " found"; });
+    for (data of pages) {
       if (request.signal.aborted) return;
       for (const journal of data.results) {
         if (matches.get(journal.jufo_id)?.topic_match && !journal.topic_match) continue;
@@ -694,11 +842,7 @@ async function search(query, mode = "fast") {
       }
       if (data.topic) matchedTopic = data.topic;
       for (const notice of data.notices) messages.add(notice);
-      if (data.next_offset != null) {
-        params.set("offset", data.next_offset);
-        statusLine.textContent = "Searching… " + matches.size + " found";
-      }
-    } while (data.next_offset != null);
+    }
     const journals = [...matches.values()];
     const count = journals.length;
     statusLine.hidden = count > 0;
@@ -714,7 +858,7 @@ async function search(query, mode = "fast") {
       statusLine.textContent = "These initials match multiple titles. Compare titles and ISSNs.";
       statusLine.hidden = false;
     }
-    showResults(journals);
+    showResults(journals, request.signal);
     articleSearch.hidden = !matchedTopic;
     articleSearch.textContent = mode === "articles" ? "Back to topic matches" : "Find matching articles";
     articleSearch.onclick = () => search(query, mode === "articles" ? "fast" : "articles");

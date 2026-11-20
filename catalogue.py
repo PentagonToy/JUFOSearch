@@ -4,8 +4,11 @@ import gzip
 import json
 import math
 import re
+import sqlite3
+import zlib
 import unicodedata
 from collections import Counter, defaultdict
+from contextlib import closing
 from difflib import get_close_matches
 from functools import lru_cache
 from pathlib import Path
@@ -38,15 +41,19 @@ def initials(title):
     return keys
 
 
-@lru_cache(maxsize=5)
+@lru_cache(maxsize=8)
 def snapshot(name):
     with gzip.open(DATA / (name + ".json.gz"), "rt", encoding="utf-8") as stream:
-        return json.load(stream)
+        data = json.load(stream)
+    if name in {"search", "titles"}:
+        manifest = json.loads((DATA / "manifest.json").read_text())
+        if data.get("version") != 1 or any(data["sources"].get(key) != manifest["files"][key]["sha256"]
+                                           for key in ("catalogue", "topics")):
+            raise ValueError("Search index is stale. Run prepare_search.py")
+    return data
 
 
-@lru_cache(maxsize=1)
-def index():
-    rows = snapshot("catalogue")["journals"]
+def build_title_index(rows):
     titles, tokens, acronyms, identifiers = defaultdict(set), defaultdict(set), defaultdict(set), defaultdict(set)
     by_id = {row["jufo_id"]: row for row in rows}
     for row in rows:
@@ -67,6 +74,32 @@ def index():
                 identifiers[row[field].replace("-", "").upper()].add(key)
 
     return by_id, titles, tokens, acronyms, identifiers
+
+
+@lru_cache(maxsize=1)
+def index():
+    data = snapshot("titles")
+    by_id = {row["jufo_id"]: row for row in data["journals"]}
+    return (by_id, *(dict((term, set(ids)) for term, ids in data[name].items())
+                     for name in ("titles", "tokens", "acronyms", "identifiers")))
+
+
+def hydrate(rows):
+    if not rows:
+        return []
+    keys = [row["jufo_id"] for row in rows]
+    records = {}
+    try:
+        with closing(sqlite3.connect((DATA / "journals.sqlite3").as_uri() + "?mode=ro&immutable=1", uri=True)) as connection:
+            for start in range(0, len(keys), 500):
+                batch = keys[start:start + 500]
+                query = "SELECT id, payload FROM journals WHERE id IN (" + ",".join("?" for _ in batch) + ")"
+                records.update((key, json.loads(zlib.decompress(payload))) for key, payload in connection.execute(query, batch))
+    except (sqlite3.Error, zlib.error) as error:
+        raise ValueError("Journal details are unavailable") from error
+    if len(records) != len(set(keys)):
+        raise ValueError("Journal details are incomplete")
+    return [{**row, **records[row["jufo_id"]]} for row in rows]
 
 
 def search_titles(query):
@@ -108,18 +141,16 @@ def search_titles(query):
     return rows, bool(exact or aliases)
 
 
-@lru_cache(maxsize=1)
-def topic_index():
-    data = snapshot("topics")
+def build_topic_index(data, identifiers):
     vocabulary = {}
     for topic in data["topics"]:
         text = " ".join([topic["display_name"], topic.get("description") or "",
                          " ".join(topic.get("keywords") or [])])
         terms = words(text)
-        vocabulary[topic["id"]] = (topic["display_name"], terms, words(topic["display_name"]))
+        strong = words(topic["display_name"] + " " + " ".join(topic.get("keywords") or []))
+        vocabulary[topic["id"]] = (topic["display_name"], terms, words(topic["display_name"]), strong)
 
     profiles = defaultdict(dict)
-    identifiers = index()[4]
     for source in data["sources"]:
         matches = set().union(*(identifiers.get(issn.replace("-", "").upper(), set())
                                 for issn in source.get("issn") or []))
@@ -139,7 +170,17 @@ def topic_index():
             if count / total >= .005:
                 postings[topic].append((key, count / total))
 
-    return vocabulary, postings
+    normalized = {key: {topic: count / sum(profile.values()) for topic, count in profile.items()}
+                  for key, profile in profiles.items() if sum(profile.values())}
+    return vocabulary, postings, normalized
+
+
+@lru_cache(maxsize=1)
+def topic_index():
+    data = snapshot("search")
+    vocabulary = {key: (name, set(terms), set(heading), set(strong))
+                  for key, (name, terms, heading, strong) in data["vocabulary"].items()}
+    return vocabulary, data["postings"]
 
 
 def search_profiles(concepts, variants, hints=None):
@@ -150,13 +191,13 @@ def search_profiles(concepts, variants, hints=None):
         phrases = [(terms, 1) for phrase in variants.get(concept, (concept,)) if (terms := words(phrase))]
         phrases.extend((words(phrase), .8) for phrase in (hints or {}).get(concept, ()))
         scores = []
-        for key, (_, terms, heading) in vocabulary.items():
+        for key, (_, terms, heading, strong) in vocabulary.items():
             score = 0
             for phrase, confidence in phrases:
                 # Keep a specific method intact; broader discovery uses explicit hints
                 if not phrase <= terms:
                     continue
-                if confidence < 1 and not phrase & heading:
+                if confidence < 1 and not phrase <= strong:
                     continue
                 score = max(score, confidence * (1 + .25 * len(phrase & heading) / len(phrase)))
             if score:

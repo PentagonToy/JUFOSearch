@@ -14,15 +14,21 @@ Title and topic searches use prepared metadata. Ordinary searches do not wait fo
 
 **Related topics** explains a candidate using OpenAlex subject profiles. At least two concepts must be related for a multi-keyword candidate. Profiles describe a journal's subjects; they do not establish that the requested methods occur together in one paper. Broader discovery terms connect PaSR and TCI with turbulent combustion, and SGS with large-eddy simulation. These hints are not used as substitutes for the requested concepts when checking article evidence. A missing profile does not remove a journal from title or ISSN search.
 
-Select **Find matching articles** to run the slower Crossref check. It searches titles and available abstracts, preserves the original keyword requirements, and provides DOI links. **Back to topic matches** restores discovery results. This is a sample, not an exhaustive literature search; incomplete metadata can hide genuine matches. External failures leave the prepared search available.
+Select **Find matching articles** to run the slower Crossref check. It searches article titles only, preserves the original keyword requirements, and provides DOI links. **Back to topic matches** restores discovery results. This is a sample, not an exhaustive literature search; incomplete metadata can hide genuine matches. External failures leave the prepared search available.
 
 The five most recent searches stay in the current browser's local storage. **Clear history** removes them. Successful prepared responses are also kept in memory for five minutes, up to ten query pages; that cache is not shared between visitors.
 
 ## Read the results
 
-**OpenAlex quartiles** opens a subject-area table with the edition and snapshot date. Hover over a quartile for its field-specific rank; assistive technology also receives the rank. These are JUFOSearch calculations from OpenAlex, not official JCR quartiles. Missing comparisons remain unavailable. See the [metric method and refresh procedure](metrics.md). They do not affect the default search order. The [related-journal strategy](recommendations.md) is a design proposal; that feature is not implemented yet.
+**OpenAlex quartiles** opens a subject-area table with the edition and snapshot date. Hover over a quartile for its field-specific rank; assistive technology also receives the rank. These are JUFOSearch calculations from OpenAlex, not official JCR quartiles. Missing comparisons remain unavailable. See the [metric method and refresh procedure](metrics.md). They do not affect the default search order. The [related-journal strategy](recommendations.md) documents the first peer implementation and its limits.
+
+**Similar journals** sits inside each journal card and loads only when opened. It shows six comparable peers, can reveal six more and can collapse back to six. These use the same recorded JUFO level, adjacent-or-equal derived quartiles and a bounded citation range, then balance topic overlap and metric proximity. Missing comparable data does not become a low-ranked journal. Recommendation quality still needs researcher review.
+
+The header uses the JUFOSearch wordmark without an icon. Headings, controls and body text share locally served IBM Plex Sans at 400, 500 and 600 weights, with the original font licence under `public/fonts/`.
 
 The theme button follows the device preference initially and saves a manual light or dark choice only in this browser. JUFO and quartile badges share four colour tiers: JUFO 3/Q1 indigo, 2/Q2 blue, 1/Q3 ochre, and 0/unclassified/Q4 slate. The visible labels retain each metric's meaning; shared colour does not convert one classification into the other.
+
+Listed APC prices appear beneath Aalto support, with the original currency and an OpenAlex source link. EUR is preferred when reported, otherwise USD or another reported currency. The price snapshot is 2026-10-14 and is not an invoice quote. Discounts, taxes, eligibility and article types can change the payable amount; no discounted invoice amount is inferred. Missing prices remain unavailable.
 
 A journal title opens its publisher website when a usable URL is present. APC support links to dated agreement details or Aalto SciFree. Agreement licences and journal licences remain distinct. The footer gives the JUFO snapshot date; source dates and agreement expiry are retained in the data and agreement dialog. Eligibility, article types and quotas still require checking with Aalto.
 
@@ -42,6 +48,8 @@ Tracked files under `data/` are compressed public metadata, not a private databa
 python3.12 -B refresh_catalogue.py --bulk /absolute/path/massa.json.zip --cache /absolute/path/source-cache
 ```
 
+The refresh also prepares title/topic postings and a read-only SQLite store of compressed journal records. Search loads the small title index and only the matching detailed records, so the first request does not parse the full JUFO export or rebuild every topic profile. Run `python3.12 -B prepare_search.py` after changing the source catalogue or topic snapshot independently. Source checksums reject stale indices.
+
 The script obtains full v2.1 series records and checks coverage against every series ID in the bulk export. It then retrieves OpenAlex topic descriptors and source profiles by registered ISSNs, plus the FinELib Elsevier list. Downloads are bounded and resumable within the same day; an older cache is refreshed. Each snapshot is replaced atomically after its preparation succeeds. A failed refresh exits with an error; do not publish an incomplete set of files.
 
 JUFO retains its own levels, histories, licences and OA metadata. OpenAlex supplies topic profiles, publishing-model evidence and the inputs for our calculated quartiles, not JCR quartiles or SCIE status. Topic profiles use the API's retained topic counts across its available publication history, not a fixed-year article cohort; these counts are normalised for ranking and are not probabilities. Ambiguous ISSN joins are excluded. FinELib terms retain their agreement expiry, and the selected SciFree observations retain their original observation dates.
@@ -55,6 +63,10 @@ python3.12 -B -m unittest -q
 node --test test_client.cjs test_theme.cjs
 ```
 
-Tests cover prepared search without network access, complete pagination, initials, Unicode, missing levels, history, topic explanations, article evidence, agreement matching and compressed responses. The snapshot checks also exercise the shipped data.
+Tests cover prepared search without network access, complete pagination, initials, Unicode, missing levels, history, topic explanations, title-only article evidence, agreement matching and compressed responses. The snapshot checks also exercise the shipped data.
 
-Vercel serves `public/` and runs `api/search.py` using the shared handler. `data/**` must be included in the Function bundle. Prepared API results are returned in batches of at most 1,000 records; the client collects every batch before enabling filters. JSON responses support gzip. Complete successful responses are cached on the CDN for five minutes; source failures are not cached. Legacy journal pagination remains available, `mode=auto` and `mode=fast` use prepared discovery, and `mode=articles` explicitly requests live paper evidence.
+Vercel serves `public/` and runs `api/search.py` using the shared handler. `data/**` must be included in the Function bundle. Prepared API results are returned in batches of at most 1,000 records; the client collects every batch before enabling filters, with at most three page requests in flight when a total count is available. JSON responses support gzip. Complete successful responses are cached on the CDN for five minutes; source failures are not cached. Legacy journal pagination remains available, `mode=auto` and `mode=fast` use prepared discovery, and `mode=articles` explicitly requests live paper evidence.
+
+## Refresh listed APCs
+
+Run `python3.12 -B refresh_fees.py --sources /absolute/path/openalex-sources/2026-10-14` against the complete public Sources snapshot. The parser accepts only finite non-negative list prices with stated currencies, verifies source coverage, and omits ambiguous ISSN matches. It never substitutes reported paid amounts, missing prices or Aalto support terms for a list APC.

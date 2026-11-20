@@ -19,6 +19,47 @@ function value(expression) {
   return JSON.parse(JSON.stringify(vm.runInContext(expression, context)));
 }
 
+test("listed APCs prefer an available euro price and never infer Aalto funding", () => {
+  assert.equal(value('listedAPC({apc:{prices:[{currency:"USD",amount:1910},{currency:"EUR",amount:1790}]}})'), "EUR 1,790");
+  assert.equal(value('listedAPC({apc:{prices:[{currency:"USD",amount:0}]}})'), "USD 0");
+  assert.equal(value('listedAPC({apc:{prices:[{currency:"EUR",amount:-1},{currency:"USD",amount:NaN}]}})'), null);
+  assert.equal(value('listedAPC({})'), null);
+  assert.equal(value('journalFacts({apc:{prices:[{currency:"EUR",amount:0}]}}).fee'), "Check SciFree");
+});
+
+test("main results and peer suggestions preserve every active filter", () => {
+  assert.equal(value('passesFilters({level:"1",fee:"Fully covered"},[["level",["1","2"]],["fee",["Fully covered"]]])'), true);
+  assert.equal(value('passesFilters({level:"1",fee:"15% discount"},[["level",["1"]],["fee",["Fully covered"]]])'), false);
+  assert.equal(value('passesFilters({level:"Unclassified"},[["level",["0"]]])'), false);
+});
+
+test("large result sets load completely with at most three parallel page requests", async () => {
+  let active = 0, maximum = 0;
+  const offsets = [];
+  context.readPage = async params => {
+    const offset = Number(params.get("offset") || 0);
+    offsets.push(offset);
+    maximum = Math.max(maximum, ++active);
+    await new Promise(resolve => setTimeout(resolve, offset === 1000 ? 8 : 1));
+    active--;
+    return {results: Array.from({length: Math.min(1000, 4501-offset)}, (_, i) => offset+i),
+      total:4501, next_offset:offset+1000 < 4501 ? offset+1000 : null};
+  };
+  const pages = await vm.runInContext('loadSearchPages(new URLSearchParams({q:"ml"}),readPage)', context);
+  assert.deepEqual(offsets.sort((a,b)=>a-b), [0,1000,2000,3000,4000]);
+  assert.equal(maximum, 3);
+  assert.deepEqual(Array.from(pages.flatMap(page=>page.results)), Array.from({length:4501},(_,i)=>i));
+});
+
+test("older responses without totals retain complete sequential pagination", async () => {
+  context.readLegacy = async params => {
+    const offset = Number(params.get("offset") || 0);
+    return {results:[offset], next_offset:offset < 2 ? offset+1 : null};
+  };
+  const pages = await vm.runInContext('loadSearchPages(new URLSearchParams({q:"ml"}),readLegacy)', context);
+  assert.deepEqual(Array.from(pages.flatMap(page=>page.results)), [0,1,2]);
+});
+
 test("SciFree journal links preserve plain titles and URL punctuation", () => {
   for (const title of ["Constructions and frames", "Computers & Fluids", "Şükrü's Journal"] ) {
     const url = new URL(value(`sciFree(${JSON.stringify(title)})`));

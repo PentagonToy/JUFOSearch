@@ -19,6 +19,8 @@ class CatalogueTests(unittest.TestCase):
             {"jufo_id": 4, "title": "Retired Journal", "is_active": False, "level": 0},
         ]
         self.data = {
+            "fees": {"journals": {}},
+            "titles": {"checked": "2026-11-20"},
             "publishing-models": {"journals": {}},
             "quartiles": {"edition": 2026, "snapshot_date": "2026-10-14", "citation_year": 2025, "cohort": "CWTS Core journals",
                           "publication_years": [2023, 2024], "journals": {}},
@@ -34,14 +36,24 @@ class CatalogueTests(unittest.TestCase):
         }
         catalogue.index.cache_clear()
         catalogue.topic_index.cache_clear()
-        self.source = patch.object(catalogue, "snapshot", side_effect=lambda name: self.data[name])
+        def prepared(name):
+            if name not in {"search", "titles"}:
+                return self.data[name]
+            _, titles, tokens, acronyms, identifiers = catalogue.build_title_index(self.rows)
+            vocabulary, postings, profiles = catalogue.build_topic_index(self.data["topics"], identifiers)
+            return dict(titles=titles, tokens=tokens, acronyms=acronyms, identifiers=identifiers,
+                        vocabulary=vocabulary, postings=postings, profiles=profiles, journals=self.rows)
+        self.source = patch.object(catalogue, "snapshot", side_effect=prepared)
         self.source.start()
         self.network = patch.object(server, "download", side_effect=AssertionError("Search must be offline"))
         self.network.start()
+        self.details = patch.object(server, "hydrate", side_effect=lambda rows: rows)
+        self.details.start()
 
     def tearDown(self):
         self.source.stop()
         self.network.stop()
+        self.details.stop()
         catalogue.index.cache_clear()
         catalogue.topic_index.cache_clear()
 
@@ -136,7 +148,7 @@ class SnapshotTests(unittest.TestCase):
     def test_snapshot_set_matches_its_manifest(self):
         manifest = json.loads((catalogue.DATA / "manifest.json").read_text())
         for name, expected in manifest["files"].items():
-            payload = (catalogue.DATA / (name + ".json.gz")).read_bytes()
+            payload = (catalogue.DATA / expected.get("filename", name + ".json.gz")).read_bytes()
             self.assertEqual(hashlib.sha256(payload).hexdigest(), expected["sha256"])
             self.assertEqual(len(payload), expected["bytes"])
 
@@ -146,6 +158,7 @@ class SnapshotTests(unittest.TestCase):
             self.assertGreaterEqual(len(data["journals"]), 38080)
             self.assertEqual(len({row["jufo_id"] for row in data["journals"]}), len(data["journals"]))
             rows, _ = server.search_prepared("0045-7930")
+            rows = catalogue.hydrate(rows)
             self.assertEqual(rows[0]["jufo_id"], 53957)
             self.assertIn("2026", rows[0]["level_history"])
             self.assertIn("license", rows[0]["external"])

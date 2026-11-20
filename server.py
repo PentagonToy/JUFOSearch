@@ -23,7 +23,8 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
-from catalogue import search_titles, search_profiles, snapshot
+from catalogue import search_titles, search_profiles, snapshot, hydrate
+from recommendations import recommend
 
 JUFO = "https://jufo-rest.csc.fi/v2.1"
 CROSSREF = "https://api.crossref.org/works"
@@ -41,6 +42,7 @@ TOPIC_VARIANTS = {
     "subgrid scale": ("subgrid scale", "subgrid", "subfilter scale", "sgs"),
     "turbulence chemistry interaction": ("turbulence chemistry interaction", "turbulent chemistry interaction", "turbulence chemistry", "tci"),
     "partially stirred reactor": ("partially stirred reactor", "pasr"),
+    "probability density function": ("probability density function", "probability density", "pdf"),
 }
 # Broader discovery terms only; article evidence still requires the original concepts
 PROFILE_HINTS = {
@@ -55,6 +57,8 @@ RESULT_FIELDS = (
     "level", "level_history", "year_start", "okm_disciplines", "matched_acronym", "examples",
     "topic_match", "matched_keywords", "keyword_total", "agreement", "agreement_status",
     "profile_keywords", "matched_topics", "quartiles", "publishing_model",
+    "recommendation_reason",
+    "apc",
 )
 LIST_URL = (
     "https://extra.kansalliskirjasto.fi/finelib_julkinen/lehtilistat/"
@@ -90,6 +94,10 @@ SCIFREE_TITLES = {
 ROOT = Path(__file__).resolve().parent / "public"
 ASSETS = {"/": ("index.html", "text/html"), "/style.css": ("style.css", "text/css"),
           "/app.js": ("app.js", "text/javascript"), "/theme.js": ("theme.js", "text/javascript")}
+ASSETS["/icon.svg"] = ("icon.svg", "image/svg+xml")
+ASSETS.update({"/fonts/" + path.name: ("fonts/" + path.name, "font/woff2")
+               for path in (ROOT / "fonts").glob("*.woff2")})
+ASSETS["/fonts/LICENSE.txt"] = ("fonts/LICENSE.txt", "text/plain")
 ISSN = re.compile(r"[0-9]{4}-?[0-9]{3}[0-9X]", re.I)
 NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 crossref_lock = Lock()
@@ -182,6 +190,10 @@ def search_prepared(query):
         return rows, False
 
     related = search_profiles(concepts, TOPIC_VARIANTS, PROFILE_HINTS)
+    anchors = {label for concept, label in concepts.items()
+               if concept in PROFILE_HINTS or concept == "computational fluid dynamics"}
+    if anchors:
+        related = [row for row in related if anchors.intersection(row["profile_keywords"])]
     matches = {row["jufo_id"]: row for row in ([] if multiple else rows)}
     for row in related:
         matches[row["jufo_id"]] = row
@@ -229,6 +241,10 @@ def keyword_topics(query):
         normalised = " ".join(part.casefold().split())
         if normalised:
             topic = TOPIC_ALIASES.get(normalised, normalised)
+            if normalised == "pdf" and any(re.search(r"\b" + anchor + r"\b", query, re.I)
+                                           for anchor in ("pasr", "cfd", "tci", "sgs", "combustion", "turbulence",
+                                                          "partially stirred reactor", "fluid dynamics")):
+                topic = "probability density function"
             label = normalised.upper() if normalised in TOPIC_ALIASES and len(normalised) <= 3 else part.strip()
             topics.setdefault(topic, label)
 
@@ -281,7 +297,7 @@ def topic_works(topic, keywords=None, minimum=1):
         "query.bibliographic" if keywords else "query.title": topic,
         "filter": f"type:journal-article,from-pub-date:{since}-01-01",
         "rows": 60,
-        "select": "DOI,title,container-title,ISSN,abstract",
+        "select": "DOI,title,container-title,ISSN",
     }
     # Crossref's public list endpoint permits one request per second and one in flight.
     with crossref_lock:
@@ -305,8 +321,7 @@ def topic_works(topic, keywords=None, minimum=1):
         if not (titles and names and identifiers and doi):
             continue
         title = unescape(re.sub(r"</?[A-Za-z][^>]*>", "", titles[0]))
-        abstract = unescape(re.sub(r"<[^>]*>", " ", item.get("abstract") or ""))
-        text = title + " " + abstract
+        text = title
         matched = [label for term, label in (keywords or {topic: topic}).items() if matches_topic(term, text)]
         if len(matched) < minimum or (minimum == 1 and not matches_topic(topic, text)):
             continue
@@ -315,8 +330,6 @@ def topic_works(topic, keywords=None, minimum=1):
         work = {"title": title, "doi": doi}
         if keywords:
             work["keywords"] = matched
-            work["abstract_keywords"] = [label for term, label in keywords.items()
-                                         if label in matched and not matches_topic(term, title)]
         venue["works"][doi] = work
     if keywords:
         return sorted(venues.values(), key=lambda venue: keyword_rank(list(venue["works"].values())))[:24 if minimum > 1 else 12]
@@ -441,6 +454,7 @@ def add_publishing_models(rows):
     data = snapshot("publishing-models")["journals"]
     for row in rows:
         row["publishing_model"] = data.get(str(row["jufo_id"]))
+        row["apc"] = snapshot("fees")["journals"].get(str(row["jufo_id"]))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -470,7 +484,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         url = urlsplit(self.path)
-        if url.path in ASSETS:
+        if url.path == "/api/recommend":
+            parameters = parse_qs(url.query)
+            reference = parameters.get("id", [""])[0]
+            if not reference.isascii() or not reference.isdigit() or len(reference) > 8:
+                self.send_json(400, {"error": "Invalid reference journal."})
+                return
+            try:
+                rows, notice = recommend(int(reference))
+                rows = hydrate(rows)
+                add_agreements(rows)
+                add_quartiles(rows)
+                add_publishing_models(rows)
+                self.send_json(200, {"results": [compact_result(row) for row in rows],
+                                     "notices": [notice] if notice else []})
+            except KeyError:
+                self.send_json(404, {"error": "Reference journal not found."})
+            except (OSError, ValueError):
+                self.send_json(502, {"error": "Similar journals are temporarily unavailable."})
+        elif url.path in ASSETS:
             filename, media = ASSETS[url.path]
             self.respond(200, media, (ROOT / filename).read_bytes())
         elif url.path == "/api/search":
@@ -503,9 +535,11 @@ class Handler(BaseHTTPRequestHandler):
             pages = int(pages_text)
             try:
                 next_offset = None
+                total = None
                 notices = []
                 if mode in {"fast", "auto"}:
                     results, topic_mode = search_prepared(query)
+                    total = len(results)
                     if len(results) > offset + 1000:
                         next_offset = offset + 1000
                     results = results[offset:offset + 1000]
@@ -514,11 +548,13 @@ class Handler(BaseHTTPRequestHandler):
                     results, notices = search_keywords(topics)
                 elif topic_mode:
                     results, notices = search_topic(topic)
+                    total = len(results)
                     if len(results) > offset + 1000:
                         next_offset = offset + 1000
                     results = results[offset:offset + 1000]
                 else:
                     results, next_offset = search_journal_batch(query, offset, pages)
+                results = hydrate(results)
                 add_agreements(results)
                 add_quartiles(results)
                 add_publishing_models(results)
@@ -528,7 +564,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send_json(200, {"results": [compact_result(row) for row in results], "notices": notices,
                                      "next_offset": next_offset,
-                                     "catalogue_checked": snapshot("catalogue")["checked"],
+                                     "total": total,
+                                     "catalogue_checked": snapshot("titles")["checked"],
                                      "topic": topic if topic_mode else None})
         else:
             self.send_error(404)

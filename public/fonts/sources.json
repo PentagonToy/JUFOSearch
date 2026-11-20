@@ -1,0 +1,20 @@
+[
+  {
+    "file": "plex-sans-regular-78efbe80.woff2",
+    "source": "https://github.com/IBM/plex/blob/master/packages/plex-sans/fonts/complete/woff2/IBMPlexSans-Regular.woff2",
+    "bytes": 65080,
+    "sha256": "78efbe80177406a1b80d5925e706e3366290bf0d5309d7b0bd2d7f0d607f3c4c"
+  },
+  {
+    "file": "plex-sans-medium-0497fab5.woff2",
+    "source": "https://github.com/IBM/plex/blob/master/packages/plex-sans/fonts/complete/woff2/IBMPlexSans-Medium.woff2",
+    "bytes": 69148,
+    "sha256": "0497fab52b9c10f9efbec00be509b16d449a1e277098f03af929ef1e7cbddb54"
+  },
+  {
+    "file": "plex-sans-semibold-0fe2655c.woff2",
+    "source": "https://github.com/IBM/plex/blob/master/packages/plex-sans/fonts/complete/woff2/IBMPlexSans-SemiBold.woff2",
+    "bytes": 69388,
+    "sha256": "0fe2655c3c88b0b4c578b0046333fde7fb60d18419b9d07b4a1e115ac893e7f6"
+  }
+]

@@ -127,26 +127,28 @@ class JournalSearchTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 server.search_keywords(server.keyword_topics("CFD, ML"))
 
-    def test_combined_search_checks_abstracts_without_returning_their_text(self):
+    def test_combined_search_uses_titles_and_ignores_abstracts(self):
         payload = {"message": {"items": [
-            {"DOI": "10.1/closure", "title": ["A data-driven <i>PaSR</i> closure"],
+            {"DOI": "10.1/closure", "title": ["Machine learning for a <i>PaSR</i> closure"],
              "abstract": "<jats:p>Neural networks improve partially stirred reactor models.</jats:p>",
              "container-title": ["Combustion journal"], "ISSN": ["1234-5678"]},
             {"DOI": "10.1/ml", "title": ["Machine learning for finance"],
              "container-title": ["Finance journal"], "ISSN": ["1234-5679"]},
+            {"DOI": "10.1/abstract-only", "title": ["A PaSR closure"],
+             "abstract": "Machine learning", "container-title": ["Combustion journal"], "ISSN": ["1234-5678"]},
         ]}}
         topics = server.keyword_topics("ml, pasr")
         with patch.object(server, "download", return_value=json.dumps(payload).encode()) as download:
             venues = server.topic_works(" ".join(topics), keywords=topics, minimum=2)
         parameters = parse_qs(urlsplit(download.call_args.args[0]).query)
         self.assertIn("query.bibliographic", parameters)
-        self.assertIn("abstract", parameters["select"][0])
+        self.assertNotIn("abstract", parameters["select"][0])
         self.assertIn(f"from-pub-date:{datetime.now().year - 9}-01-01", parameters["filter"][0])
         self.assertEqual(len(venues), 1)
         work = venues[0]["works"]["10.1/closure"]
-        self.assertEqual(work["title"], "A data-driven PaSR closure")
+        self.assertEqual(work["title"], "Machine learning for a PaSR closure")
         self.assertEqual(work["keywords"], ["ML", "pasr"])
-        self.assertEqual(work["abstract_keywords"], ["ML"])
+        self.assertNotIn("abstract_keywords", work)
         self.assertNotIn("abstract", work)
 
     def test_keyword_search_queries_the_combination_before_individual_concepts(self):
