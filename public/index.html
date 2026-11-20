@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>JUFOSearch · Journal finder</title>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
@@ -11,13 +12,19 @@
   <header class="masthead">
     <div class="wrap masthead-inner">
       <a class="brand" href="/"><span class="mark" aria-hidden="true">J</span> JUFOSearch</a>
-      <a class="policy" href="https://www.aalto.fi/en/services/open-access-agreements" target="_blank" rel="noopener">Aalto publishing agreements ↗</a>
+      <div class="masthead-actions">
+        <a class="policy" href="https://www.aalto.fi/en/services/open-access-agreements" target="_blank" rel="noopener">Aalto agreements ↗</a>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Use dark theme" title="Use dark theme">
+          <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 13.5A8.5 8.5 0 0 1 10.5 3a8.5 8.5 0 1 0 10 10.5Z"/></svg>
+          <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+        </button>
+      </div>
     </div>
   </header>
   <main class="wrap">
     <section class="hero" aria-labelledby="page-title">
       <h1 id="page-title">Find a journal</h1>
-      <p class="hero-note">Explore journals. Check rankings, publishing support and open access.</p>
+      <p class="hero-note">JUFO, publishing support and open access.</p>
       <form id="search">
         <div class="search-row">
           <label for="query" class="sr-only">Journal title, ISSN, initials or keywords</label>
@@ -48,7 +55,10 @@
         <button id="reset-filters" class="text-button" type="button" hidden>Clear filters</button>
       </fieldset>
       <div class="result-toolbar">
-        <p id="filter-status" role="status" aria-atomic="true" hidden></p>
+        <div class="result-summary">
+          <p id="filter-status" role="status" aria-atomic="true" hidden></p>
+          <button id="article-search" class="text-button" type="button" hidden>Find matching articles</button>
+        </div>
         <div id="pagination" class="pagination" hidden>
           <label class="page-size" for="page-size">Per page
             <select id="page-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option></select>
@@ -73,6 +83,7 @@
       <a href="https://www.crossref.org/documentation/retrieve-metadata/rest-api/" target="_blank" rel="noopener">Crossref ↗</a>
       <a href="https://finelib.fi/open-access-publishing-in-elsevier-journals/" target="_blank" rel="noopener">FinELib ↗</a>
       <a class="github-link" href="https://github.com/PentagonToy/JUFOSearch" target="_blank" rel="noopener">GitHub ↗</a>
+      <small id="catalogue-date" hidden></small>
     </footer>
   </main>
   <dialog id="agreement-dialog" aria-labelledby="agreement-title">

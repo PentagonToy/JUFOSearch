@@ -19,6 +19,16 @@ function value(expression) {
   return JSON.parse(JSON.stringify(vm.runInContext(expression, context)));
 }
 
+test("JUFO levels and quartiles share four visual tiers without changing missing labels", () => {
+  assert.deepEqual(value('[0,1,2,3].map(level => rankTier(level))'), [0, 1, 2, 3]);
+  assert.deepEqual(value('[4,3,2,1].map(q => rankTier(q,true))'), [0, 1, 2, 3]);
+  assert.equal(value('rankTier(null)'), 0);
+  assert.equal(value('rankTier(undefined)'), 0);
+  assert.equal(value('rankTier("None")'), 0);
+  assert.equal(value('rankTier(0,true)'), 0);
+  assert.equal(value('journalFacts({level:null}).level'), "Unclassified");
+});
+
 test("recent searches validate local data, deduplicate and keep only five", () => {
   assert.deepEqual(value('recentQueries([" ML ", "ml", null, 3, "a", "x".repeat(161), "CFD", "SGS", "TCI", "Physics", "Energy"])'),
     ["ML", "CFD", "SGS", "TCI", "Physics"]);
@@ -81,4 +91,13 @@ test("missing metadata has neutral values and unclassified is distinct from zero
     licence: "Not listed", model: "Not listed",
   });
   assert.equal(value('journalFacts({level: 0}).level'), "0");
+});
+
+test("positive model evidence fills gaps without treating non-OA as hybrid or free", () => {
+  assert.equal(value('publishingInfo({external:{oa_info:{is_oa:false,is_hybrid:false,open_access_type:"unknown"}}}).model'), "Not listed");
+  assert.equal(value('publishingInfo({external:{oa_info:{is_oa:true}}}).model'), "Gold OA");
+  assert.equal(value('publishingInfo({publishing_model:{model:"Hybrid OA",provider:"Publisher"}}).model'), "Hybrid OA");
+  assert.equal(value('publishingInfo({external:{oa_info:{is_diamondOA:true}},agreement:{model:"Pure OA"}}).model'), "Diamond OA");
+  assert.equal(value('publishingInfo({external:{oa_info:{open_access_type:"Hybrid"}},publishing_model:{model:"Gold OA"}}).model'), "Hybrid OA");
+  assert.equal(value('journalFacts({publishing_model:{model:"Hybrid OA"}}).fee'), "Check SciFree");
 });
