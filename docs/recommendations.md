@@ -1,62 +1,71 @@
-# Related-journal recommendation strategy
+# Journal recommendation strategy — peer alternatives first
 
-Status: design only. Quartiles and publishing-model evidence were deployed on 20 November 2026. Recommendations are not implemented.
+Status: proposal, not implemented. This replaces the earlier topic-first design following the user's request on 20 November 2026. The two axes are research fit and proximity to the reference journal's standing. Citation indicators describe journals; they do not estimate manuscript quality or acceptance probability.
 
-## Intended behaviour
+## Two entry paths
 
-Help a researcher find another suitable publication venue using a reference journal **and the research keywords already entered**. Similarity to an entire journal is useful evidence, but it should not dominate the user's particular topic. JUFO level, citation quartile and publisher reputation do not receive automatic ranking bonuses.
-
-The first version should add one contextual action, **Similar journals**, and reuse the existing results, filters and page controls. Each suggested journal gets one short explanation identifying the connection. Keep six initial suggestions varied enough to include both close subject neighbours and relevant methodological neighbours. Do not expose a similarity percentage, acceptance estimate or scoring controls.
-
-Carry the original research keywords when the action is chosen from keyword results. A title lookup alone supplies no research keywords: use the journal profile without inventing a manuscript topic. Show the reference and any carried keywords once above the results. **Back to results** restores the original query, filters, page and scroll position. Do not introduce a second search form or duplicate the journal cards.
-
-## What the current data establishes
-
-An offline diagnostic used 30,001 uniquely joined journal-topic profiles from the shipped snapshot. Topic-only neighbours were ordered by weighted Jaccard overlap of normalised retained topic counts, excluding inactive records and the reference itself. These are diagnostic ranks, not relevance judgements or production recommendations.
-
-| Diagnostic | Observation | Consequence |
+| Input | Purpose | Default ordering |
 | --- | --- | --- |
-| AECS profile only | Energy and AI ranks 174th; the nearest journals are primarily combustion venues. | Searching only the nearest journal profiles can miss methodological neighbours. |
-| `energy, ml` discovery only | Energy and AI ranks 213th among 5,757 candidates; drug-design and materials venues occur near the top. | Keyword coverage alone is too permissive for a short recommendation list. |
-| `ml, pasr` discovery | Energy and AI ranks 30th among 138 candidates. | The candidate pool contains it, but the profile does not prove PaSR publication evidence. |
-| `ml, sgs` discovery | No candidates. The SGS hint requires a heading-word overlap that the relevant fluid-dynamics topic lacks, despite its LES keywords. | Repair and test method-to-topic mapping before shipping recommendations. Never translate this failure into “no suitable journals”. |
+| Journal title, ISSN or resolved initials, e.g. AECS | Find realistic alternatives to that journal. | Establish a comparable peer pool, then balance subject fit, metric proximity and useful subject variety. |
+| Research keywords, e.g. `ML, PaSR, PDF` | Find venues for the research, including methodological neighbours. | Domain and method fit first, within the user's explicit filters. Do not silently choose a reference journal or infer one from browser history. |
 
-Energy and AI's largest retained topics include energy forecasting and smart grids; AECS's largest include combustion engines and flame dynamics. Energy and AI is therefore a plausible methodological neighbour when energy and ML are requested, not an unconditional alternative for every combustion manuscript. No proposed ranking has yet been validated by a researcher.
+Use one search box. Resolve ambiguous initials such as C&F before using a reference. A recognised journal title is not converted into topic keywords. When the user chooses Similar journals from keyword results, preserve both the chosen reference and the original research keywords.
 
-## Candidate and ranking pipeline
+## Comparable does not mean higher
 
-1. Resolve the reference journal by JUFO ID. An ambiguous acronym must not silently choose one of its journals.
-2. Form the candidate union from nearby journal-topic profiles and the existing keyword-discovery results. Match identities by ISSN, retain active candidates and exclude the reference itself. Restrict recommendations to verified journal sources: the current JUFO series catalogue also contains book series and proceedings. Do not maintain a hand-written list of recommended journals.
-3. Apply the user's explicit JUFO, APC and other selected constraints. Missing data remains unknown and must not become a favourable score.
-4. Require a credible connection to the reference's research domain and prioritise coverage of the original research concepts. Distinguish a method found in a topic's name or keywords from one mentioned only in its description, and distinguish both from a broader discovery hint. Use similarity to the reference journal as supporting evidence, with topic proportions rather than raw publication volume. A broad term such as energy must not give a drug-design topic the same domain evidence as an energy-research topic.
-5. Diversify the short list across the strongest relevant connections. Avoid returning six nearly identical combustion profiles when an energy-and-ML candidate has a credible connection. A diverse candidate still needs relevance; do not fill a category merely to balance the display.
-6. Offer the existing optional paper check for specific methods. Journal-level topic overlap must never be presented as proof that PaSR and ML occur together in one paper. A failed live check should not erase the prepared candidates.
+Maintain separate provenance for each indicator: provider, edition, subject category and coverage. Compare JIF with JIF, SJR with SJR, and category percentiles with the same provider's percentiles. Do not average raw JIF and SJR, compare different editions silently, or choose each journal's best category to manufacture a match. Category percentile provides finer distance than Q1–Q4; use a genuinely shared relevant category first. A cross-category comparison uses the journals' relevant dominant categories and carries lower confidence.
 
-Start with explicit ordering by concept coverage and evidence strength before tuning a blended score. Freeze a small evaluation set first; add numerical weights only if they improve held-out cases. Keep all expensive profile preparation outside the visitor's request.
+The application currently holds JUFO levels and our own OpenAlex-derived quartiles and citation averages. It does not hold verified JIF or SJR values. The first free version can therefore use these available indicators as explicitly labelled proxies. The OpenAlex citation average is never labelled JIF, and its quartiles are never labelled JCR or SJR. Official JIF/SJR can be integrated later only with a verified reusable source; missing indicators are not fabricated.
 
-Use one eligible candidate pool. Select the strongest relevant candidate, then favour a different supported topic connection among candidates with equivalent concept coverage and evidence strength. Do not force a fixed number of subject and method slots, and do not relax filters to fill six places. Return fewer candidates when the evidence is weak. Keep JUFO and quartile values as comparison information or explicit filters; they are not proxies for manuscript acceptance difficulty.
+For title-only recommendations, begin with these **provisional evaluation rules**, not a production formula:
 
-Prepare compact normalised topic profiles and topic-to-journal postings with the existing data refresh. The current topic snapshot retains source IDs but not source types: retain the journal type from OpenAlex before enabling journal-only recommendations, rather than guessing from titles. Compare only the candidate union at request time. Reuse the current catalogue, filters and cards; the first version needs no LLM, vector database, paid API or live publisher lookup. Preserve profile provenance and the reason for each inclusion. A candidate with no verified profile cannot receive a fabricated similarity reason.
+1. Apply the user's JUFO, APC, licence and publishing-model constraints. Exclude the reference, duplicate identities, inactive records and non-journal sources. Persist the OpenAlex source type during refresh; the present topic snapshot does not retain it.
+2. Require a credible subject connection. Build a wider pool from shared topics and their related subfields, rather than taking only the nearest six full-journal profiles. This allows computational-fluid and broader energy venues to be considered for AECS without hand-written journal lists.
+3. For evaluated JUFO levels 1–3, start with the same level. A jump from level 1 to 3 does not belong in the default peer pool. Do not widen the band merely to fill twelve places.
+4. Compare relevant subject quartiles/percentiles and the same-edition citation average. Test a same-or-adjacent-quartile band and a symmetric citation-ratio band of 2.5 as an initial diagnostic. These are starting hypotheses for validation, not established boundaries of journal quality. A true zero uses available category ranks instead of division; missing data never becomes zero or a confirmed peer match.
+5. Within the eligible pool, prefer candidates that are both relevant and metrically close. Compare continuous proximity, not a bonus for a larger number. Evaluate topic-only ordering against a two-axis shortlist and remove near-duplicate subject profiles only where another relevant peer adds useful coverage. Do not fix numerical weights from this single combustion example.
 
-## Evaluation before implementation
+For a reference without comparable standing data, offer clearly labelled topic matches rather than claiming equivalent quality. Keep incomplete cases distinct from the confirmed peer list. Levels 0 and unclassified are not interchangeable quality bands.
 
-| Case | Expected behaviour |
-| --- | --- |
-| AECS + combustion | Closely related combustion journals are prominent. |
-| AECS + energy and ML | Methodological neighbours such as Energy and AI are considered when their profiles support the connection. |
-| AECS + ML and PaSR | Distinguish broad energy/ML fit from actual PaSR paper evidence. Do not label Energy and AI as a proven PaSR venue without that evidence. |
-| Computers & Fluids + ML and SGS | Include relevant computational-method venues, not just journals with “fluids” in their titles. |
-| C&F as reference | Require identity resolution between Computers & Fluids and Combustion & Flame. |
-| New journal or absent profile | Preserve title lookup and explain unavailable recommendation evidence. |
+## AECS calibration examples
 
-Use researcher-reviewed relevance judgements for these cases and unrelated negative cases. Check useful candidates in the first six results, diversity without relevance loss, reasons that trace to data, and the effect of each filter. Energy and AI is a diagnostic example, not a hard-coded promotion target. Adding a high quartile must not move an otherwise identical candidate upward.
+The following are observations from the shipped 2026 metric edition, OpenAlex snapshot 2026-10-14. Values are our OpenAlex citation averages and derived quartiles, **not JIF/SJR**. Ranges show all retained relevant categories rather than the best category alone.
 
-## Implementation gates
+| Journal | JUFO | OpenAlex average | Derived Q | Role in evaluation |
+| --- | --- | --- | --- | --- |
+| AECS | 1 | 2.84 | Q2 | Reference |
+| Computers and Fluids | 1 | 2.78 | Q2 | Computational-fluid peer candidate |
+| Combustion Science and Technology | 1 | 1.32 | Q3 | Combustion peer candidate |
+| Combustion Theory and Modelling | 1 | 1.46 | Q3 | Combustion/modelling peer candidate |
+| International Journal of Energy Research | 1 | 4.33 | Q2–Q3 | Broader energy peer candidate |
+| Journal of Fluid Mechanics | 3 | 4.37 | Q1 | Exclude from AECS's default peer pool |
+| Combustion and Flame | 3 | 6.27 | Q1 | Exclude from AECS's default peer pool |
+| Energy and AI | 1 | 8.57 | Q1 | Consider for relevant keyword discovery; not an unconditional title-only peer |
 
-1. Fix SGS/LES mapping and separate direct metadata evidence from broad hints. Add negative cases for medical drug design versus energy engineering and for generic neural-network mentions. Keep method synonym rules general; journal titles never belong in those rules.
-2. Freeze at least 12 reference-and-keyword cases before tuning. Include the cases above, unrelated domains, short profiles, journal identity ambiguity and restrictive filters. Have the researcher label candidate fit as relevant, plausible or unrelated without showing JUFO or quartiles. Hold out part of the set from tuning.
-3. Compare profile-only, keyword-only and combined candidates. Publish the first-six results and their reasons for review; proceed only if combined recommendations retain useful neighbours and reduce unrelated results on the held-out cases. An unreviewed offline score is not a passing relevance test.
-4. Check invariants: no self-recommendations, duplicate identities, non-journal sources, inactive venues or filter violations; no promotion from higher JUFO/quartile values; no claim of method co-occurrence without paper evidence; no fabricated reason for missing metadata.
-5. Verify the contextual action and back navigation, empty and partial results, keyboard/mobile access and response time against the deployed prepared-search baseline. A failed optional article check must leave the candidate list usable.
+JFM and International Journal of Energy Research have almost the same OpenAlex average, but different JUFO levels. Conversely, Energy and AI shares AECS's JUFO level but has a substantially higher citation average. Neither one indicator nor quartile equality alone captures the requested notion of a comparable venue.
 
-The next implementation step is the mapping repair and a reviewable candidate diagnostic, not a new recommendation interface. This keeps the present site small while testing whether the proposed recommendations are actually useful.
+The initial same-JUFO/adjacent-Q probe excludes JFM and Combustion and Flame and ranks CST and CTM first and second. It still puts Computers and Fluids 54th and International Journal of Energy Research 46th when ordered only by full-profile overlap. This is evidence that peer filtering alone is insufficient: candidate generation and the subject-versus-proximity ordering need to be tested together. The user's four examples are calibration cases, not hard-coded winners or a promise that all four will occupy the first six positions.
+
+## Keyword discovery: domain plus method
+
+For `ML, PaSR, PDF`, treat PaSR as a turbulent-combustion domain/method anchor, ML as the computational approach, and PDF as probability density function when that combustion context supports it. Do not globally translate PDF into that meaning or search for document formats. Preserve the original concepts alongside aliases and broader hints.
+
+Energy and AI can enter the pool through supported energy/modelling and ML connections even if its overall journal profile differs from AECS. Keyword-only discovery has no reference-specific citation-ratio band; explicit user filters still apply. Where a reference is also supplied, show its standing as context and allow method relevance to broaden discovery without calling the result an equivalent peer. No candidate receives a bonus merely for being Q1 or highly cited.
+
+Distinguish full concept coverage from partial methodological fit. A journal profile containing neural-network topics does not establish that it publishes PaSR/PDF closure papers. Keep the reason short and traceable; the existing optional article check can strengthen that evidence. Do not require literal occurrence of all acronyms in a journal title, and do not present broad topic hints as proof of co-occurrence.
+
+## Six results, twelve at most
+
+Show at most six compact recommendation cards, with one short reason per card and the existing JUFO/quartile information. One **Show 6 more** control reveals the remaining eligible candidates, up to twelve total. Expansion uses the same ordered pool and constraints: it does not silently admit more prestigious, less relevant or unverified-quality journals. Return fewer when insufficient candidates qualify; omit expansion when nothing remains.
+
+Keep one contextual Similar journals action and a Back to results action that restores the original query, filters, page and scroll. Do not add a separate search mode selector, scoring sliders or recommendation pagination. The main search retains its existing page-size controls.
+
+## Verification before implementation
+
+Freeze at least twelve reference-and-keyword cases across domains before tuning, with held-out cases. Assess research fit first, then peer comparability; record both judgements rather than concealing standing information throughout the review. Include the AECS examples, `ML, PaSR, PDF`, `ML, SGS`, an unrelated medical negative, ambiguous C&F, missing metrics, real zero scores and restrictive APC/JUFO filters.
+
+Compare topic-only, peer-filtered and combined shortlists at six and twelve. Verify that JFM and Combustion and Flame are excluded from AECS title-only peers through general rules; Energy and AI remains eligible for relevant keyword discovery; expansion preserves filters and ordering; missing metadata cannot masquerade as low quality. Inspect candidates below rank twelve to detect useful peers lost by candidate generation. No unreviewed offline score constitutes a passed relevance assessment.
+
+Repair SGS/LES topic mapping and add context-aware PDF disambiguation before enabling recommendations. Use prepared compact profiles, metric records and topic postings; the first version needs no LLM, vector database, paid API or live metric request. This proposal does not introduce a recommender UI or claim validated acceptance predictions.
+
+Sources: [OpenAlex source attributes](https://help.openalex.org/data/sources/attributes/), [Clarivate category percentiles](https://supportcenter.clarivate.com/s/article/Journal-Citation-Reports-Quartile-rankings-and-other-metrics?language=en_US). The local data method is documented in [metrics.md](metrics.md).

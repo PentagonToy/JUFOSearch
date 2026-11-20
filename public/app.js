@@ -468,7 +468,7 @@ function renderJournal(journal) {
   const level = journal.level == null ? "Unclassified" : "Level " + journal.level;
   const {fee, licence, model} = journalFacts(journal);
   const modelInfo = publishingInfo(journal);
-  const sciFreeUrl = sciFree('"' + journal.title + '"');
+  const sciFreeUrl = sciFree(journal.title);
   const heading = element("h2");
   const publisherUrl = journalWebsite(journal);
   if (publisherUrl) heading.append(link(journal.title, publisherUrl));

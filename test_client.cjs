@@ -19,6 +19,15 @@ function value(expression) {
   return JSON.parse(JSON.stringify(vm.runInContext(expression, context)));
 }
 
+test("SciFree journal links preserve plain titles and URL punctuation", () => {
+  for (const title of ["Constructions and frames", "Computers & Fluids", "Şükrü's Journal"] ) {
+    const url = new URL(value(`sciFree(${JSON.stringify(title)})`));
+    assert.equal(url.origin, "https://search.scifree.se");
+    assert.equal(url.pathname, "/aalto");
+    assert.equal(url.searchParams.get("term"), title);
+  }
+});
+
 test("JUFO levels and quartiles share four visual tiers without changing missing labels", () => {
   assert.deepEqual(value('[0,1,2,3].map(level => rankTier(level))'), [0, 1, 2, 3]);
   assert.deepEqual(value('[4,3,2,1].map(q => rankTier(q,true))'), [0, 1, 2, 3]);
