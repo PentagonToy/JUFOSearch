@@ -1,0 +1,152 @@
+{
+  "source": "https://journalcheckertool.org/funder-ids/",
+  "checked": "2026-11-23",
+  "license": "CC BY 4.0",
+  "funders": [
+    {
+      "country": "Australia",
+      "id": "nationalhealthandmedicalresearchcouncil",
+      "name": "National Health and Medical Research Council"
+    },
+    {
+      "country": "Austria",
+      "id": "austriansciencefundfwf",
+      "name": "Austrian Science Fund"
+    },
+    {
+      "country": "Canada",
+      "id": "quebecresearchfunds",
+      "name": "Fonds de recherche du Québec (Quebec Research Funds)"
+    },
+    {
+      "country": "Finland",
+      "id": "academyoffinlandaka",
+      "name": "Research Council of Finland"
+    },
+    {
+      "country": "France",
+      "id": "frenchnationalresearchagencyanr",
+      "name": "French National Research Agency"
+    },
+    {
+      "country": "Ireland",
+      "id": "sciencefoundationirelandsfi",
+      "name": "Research Ireland"
+    },
+    {
+      "country": "Italy",
+      "id": "nationalinstitutefornuclearphysicsinfnitaly",
+      "name": "National Institute for Nuclear Physics"
+    },
+    {
+      "country": "Jordan",
+      "id": "highercouncilforscienceandtechnologyhcstjordan",
+      "name": "Higher Council for Science and Technology"
+    },
+    {
+      "country": "Luxembourg",
+      "id": "luxembourgnationalresearchfundfnr",
+      "name": "Luxembourg National Research Fund"
+    },
+    {
+      "country": "Netherlands",
+      "id": "netherlandsorganisationforscientificresearchnwo",
+      "name": "Netherlands Organisation for Scientific Research"
+    },
+    {
+      "country": "Norway",
+      "id": "researchcouncilofnorwayrcn",
+      "name": "Research Council of Norway"
+    },
+    {
+      "country": "Poland",
+      "id": "nationalsciencecentrepolandncn",
+      "name": "National Science Centre"
+    },
+    {
+      "country": "Portugal",
+      "id": "foundationforscienceandtechnology",
+      "name": "Foundation for Science and Technology"
+    },
+    {
+      "country": "Slovenia",
+      "id": "slovenianresearchandinnovationagency",
+      "name": "Slovenian Research and Innovation Agency"
+    },
+    {
+      "country": "South Africa",
+      "id": "southafricanmedicalresearchcouncilsamrc",
+      "name": "South African Medical Research Council"
+    },
+    {
+      "country": "Sweden",
+      "id": "fortesweden",
+      "name": "Forte"
+    },
+    {
+      "country": "Sweden",
+      "id": "formassweden",
+      "name": "Formas"
+    },
+    {
+      "country": "Sweden",
+      "id": "vinnovasweden",
+      "name": "Vinnova"
+    },
+    {
+      "country": "Switzerland",
+      "id": "swissnationalsciencefoundationsnsf",
+      "name": "Swiss National Science Foundation"
+    },
+    {
+      "country": "United Kingdom",
+      "id": "unitedkingdomresearchinnovationukri",
+      "name": "UK Research and Innovation (UKRI and research councils)"
+    },
+    {
+      "country": "United Kingdom",
+      "id": "wellcome",
+      "name": "Wellcome"
+    },
+    {
+      "country": "Zambia",
+      "id": "nationalscienceandtechnologycouncilnstczambia",
+      "name": "National Science and Technology Council"
+    },
+    {
+      "country": "International",
+      "id": "aligningscienceacrossparkinsonsasap",
+      "name": "Aligning Science Across Parkinson’s"
+    },
+    {
+      "country": "International",
+      "id": "billmelindagatesfoundation",
+      "name": "Bill & Melinda Gates Foundation"
+    },
+    {
+      "country": "International",
+      "id": "europeancommissionhorizoneuropeframeworkprogramme",
+      "name": "European Commission (Horizon Europe)"
+    },
+    {
+      "country": "International",
+      "id": "howardhughesmedicalinstitutehhmi",
+      "name": "Howard Hughes Medical Institute"
+    },
+    {
+      "country": "International",
+      "id": "specialprogrammeforresearchandtrainingintropicaldiseasestdr",
+      "name": "Special Programme for Research and Training in Tropical Diseases"
+    },
+    {
+      "country": "International",
+      "id": "templetonworldcharityfoundationtwcf",
+      "name": "Templeton World Charity Foundation"
+    },
+    {
+      "country": "International",
+      "id": "worldhealthorganizationwho",
+      "name": "World Health Organization"
+    }
+  ]
+}

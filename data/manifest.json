@@ -1,0 +1,69 @@
+{
+  "checked": "2026-11-20",
+  "counts": {
+    "jufo_series": 38081,
+    "openalex_sources": 30492,
+    "topics": 4516,
+    "quartile_journals": 17223,
+    "publishing_model_records": 29614,
+    "listed_apc_journals": 11061
+  },
+  "files": {
+    "agreements": {
+      "filename": "agreements.json.gz",
+      "bytes": 21727,
+      "sha256": "1b185a53673685a4221490da8e55fe90848be1070f81c06378909da21f5649b8"
+    },
+    "catalogue": {
+      "filename": "catalogue.json.gz",
+      "bytes": 3982531,
+      "sha256": "028f9a1a8eddc76a685a12e5b6b009da59f75763acb14f9e33acb751b3e683ca"
+    },
+    "fees": {
+      "filename": "fees.json.gz",
+      "bytes": 183285,
+      "sha256": "5e1d62da9b728428a11a6a4141641b0bd53a14131738f228b12bb54dc2e4a624"
+    },
+    "journals.sqlite3": {
+      "filename": "journals.sqlite3",
+      "bytes": 37060608,
+      "sha256": "b07d4d59943a6e4c179aa822f7af70d7ea5351835c8cb11e2fa2a14bc58f5cb2"
+    },
+    "peers": {
+      "filename": "peers.json.gz",
+      "bytes": 7041145,
+      "sha256": "507e1087a136a96ba0835072864f8d258342b812cb5f491c7c162a87c3c7755c"
+    },
+    "publishing-models": {
+      "filename": "publishing-models.json.gz",
+      "bytes": 282320,
+      "sha256": "66a8d38b9a4c6d3d7c62ffc785f9336dd4cc0b6f7697cd981d54d6a8c7032b18"
+    },
+    "quartiles": {
+      "filename": "quartiles.json.gz",
+      "bytes": 808614,
+      "sha256": "f175cd1b62033b4a0f98058c214eb35caa1b8af295f06c4d1a9ccbed20a4a9e2"
+    },
+    "search": {
+      "filename": "search.json.gz",
+      "bytes": 8904210,
+      "sha256": "fb598d6b6ba1090623cc0b0f93ecb6058af03383c8b20f4fd7680fbe66dc808a"
+    },
+    "titles": {
+      "filename": "titles.json.gz",
+      "bytes": 3201383,
+      "sha256": "de9d41affa6bd9017841ea471de9fc29ff26ab0398fd901079bb541285fcb9e5"
+    },
+    "topics": {
+      "filename": "topics.json.gz",
+      "bytes": 5051294,
+      "sha256": "2357f659c7deb6fcec42bbab50b73bf61dc71c56413bbcf98df7ea82c08b091f"
+    }
+  },
+  "sources": [
+    "https://jufo-rest.csc.fi/v2.1",
+    "https://jufo-rest.csc.fi/v1.1/massa.json.zip",
+    "https://api.openalex.org",
+    "https://extra.kansalliskirjasto.fi/finelib_julkinen/lehtilistat/Elsevier/Freedom_publishing_title_list.xlsx"
+  ]
+}

@@ -3,6 +3,6 @@
   "framework": null,
   "outputDirectory": "public",
   "functions": {
-    "api/search.py": { "maxDuration": 60, "includeFiles": "journal-acronyms.json" }
+    "api/*.py": { "maxDuration": 60, "includeFiles": "data/**" }
   }
 }

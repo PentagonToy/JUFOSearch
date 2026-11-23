@@ -1,0 +1,4 @@
+tests/
+scripts/
+docs/
+**/__pycache__/

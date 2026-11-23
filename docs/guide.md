@@ -4,35 +4,83 @@
 
 ## Run locally
 
-Use Python 3.12 and macOS's built-in curl. From the repository directory, run the following command and open [JUFOSearch](http://127.0.0.1:8765/).
+From the repository directory, run `python3.12 -B server.py` and open [localhost](http://127.0.0.1:8765/). Use the designated Workspace agent interpreter when working on the shared MacBook. Pass `--port 8876` to choose another port. No package installation or frontend build is required.
+
+## Search
+
+### OA publishing routes
+
+Optionally open **Preferences** beside the recent searches to choose an institution and funder. **Apply** shares the selection across this page's journal cards; **Remember on this browser** also saves it in local storage for later visits. **Reset** removes only these preferences and restores the Aalto/RCF defaults. Browser storage can be unavailable or cleared; preferences are not an account profile or a shared visitor history. The settings open in a native popover instead of expanding the landing page. Each card's **OA routes** uses the current selection and offers **Change** without requiring a trip back to the search box.
+
+Institution suggestions cover every country and are sorted by country, then name. Choose a specific name or ROR. Funders use all 29 distinct policy IDs on the [official JCT list](https://journalcheckertool.org/funder-ids/), checked on 23 November 2026; UK research councils share the UKRI policy ID. Country groups organise the selector, while internationally operating organisations have their own group. Aalto and RCF remain the defaults. A different OA institution does not change the separately labelled Aalto APC terms.
+
+**Check routes** confirms publishing options for the selected combination. Green means a confirmed route; no route, an unmatched journal and a service failure have distinct messages. Full conditions and attribution remain under **Conditions and sources**. Applying new preferences clears previous results; rechecking preserves the current result while loading.
+
+The checker verifies the active ROR record, funder and returned ISSN. It tries the JUFO record's ISSN-L first, followed by its other registered identifiers only on identity mismatch. A real negative verdict is not retried under another identity. Resolved checks are cached for up to an hour per process and five minutes at the CDN. ROR validation, funder wording and calculation run concurrently; source failures are not cached as verdicts.
+
+JCT policy results do not confirm APC funding. Aalto's prior licence policy remains separate guidance for submissions from 1 January 2026. Content is attributed to cOAlition S / European Science Foundation under CC BY 4.0. See the [API documentation](https://journalcheckertool.org/apidocs/) and [Aalto policy](https://www.aalto.fi/en/open-science-and-research/aalto-university-prior-licence-model).
+
+### Journal discovery
+
+Use the single box for a journal title, ISSN, initials or up to eight keywords separated by commas or semicolons. Examples include `Computers and fluids`, `0045-7930`, `C&F`, `ml, pasr` and `CFD, ML, SGS, TCI`. Space-separated recognised abbreviations also work. Exact titles and identifiers take priority. Initials can identify several journals; compare titles and ISSNs.
+
+Title and topic searches use prepared metadata. Ordinary searches do not wait for Crossref, JUFO or FinELib requests. Filters apply to the complete returned set, including inactive and unclassified JUFO series records. Results show 50 journals per page by default, with options for 100 or 150.
+
+**Related topics** explains a candidate using OpenAlex subject profiles. At least two concepts must be related for a multi-keyword candidate. Profiles describe a journal's subjects; they do not establish that the requested methods occur together in one paper. Broader discovery terms connect PaSR and TCI with turbulent combustion, and SGS with large-eddy simulation. These hints are not used as substitutes for the requested concepts when checking article evidence. A missing profile does not remove a journal from title or ISSN search.
+
+Select **Find matching articles** to run the slower Crossref check. It searches article titles only, preserves the original keyword requirements, and provides DOI links. **Back to topic matches** restores discovery results. This is a sample, not an exhaustive literature search; incomplete metadata can hide genuine matches. External failures leave the prepared search available.
+
+The five most recent searches stay in the current browser's local storage. Opening a similar journal is navigation, so it does not add a recent search; its ISSN still identifies the lookup, while the search field shows the verified journal title. Reloading or opening that link in a new tab keeps this behaviour. **Clear history** removes them. Successful prepared responses are also kept in memory for five minutes, up to ten query pages; that cache is not shared between visitors.
+
+## Read the results
+
+**Rankings** combines JUFO history and recent annual levels with a separate OpenAlex quartile table. The subject-area table includes the edition and snapshot date. Hover over a quartile for its field-specific rank; assistive technology also receives the rank. These are JUFOSearch calculations from OpenAlex, not official JCR quartiles. Missing comparisons remain unavailable. See the [metric method and refresh procedure](metrics.md). They do not affect the default search order. The [related-journal strategy](recommendations.md) documents the first peer implementation and its limits.
+
+**Similar journals** sits inside each journal card and loads only when opened. It shows six comparable peers, can reveal six more and can collapse back to six. These use the same recorded JUFO level, adjacent-or-equal derived quartiles and a bounded citation range, then balance topic overlap and metric proximity. Missing comparable data does not become a low-ranked journal. Recommendation quality still needs researcher review.
+
+The header uses the JUFOSearch wordmark without an icon. Headings, controls and body text share locally served IBM Plex Sans at 400, 500 and 600 weights, with the original font licence under `public/fonts/`.
+
+The theme button follows the device preference initially and saves a manual light or dark choice only in this browser. JUFO and quartile badges share four colour tiers: JUFO 3/Q1 indigo, 2/Q2 blue, 1/Q3 ochre, and 0/unclassified/Q4 slate. The visible labels retain each metric's meaning; shared colour does not convert one classification into the other.
+
+Listed APC prices appear beneath Aalto support, with the original currency and an OpenAlex source link. EUR is preferred when reported, otherwise USD or another reported currency. The price snapshot is 2026-10-14 and is not an invoice quote. Discounts, taxes, eligibility and article types can change the payable amount; no discounted invoice amount is inferred. Missing prices remain unavailable.
+
+A journal title opens its publisher website when a usable URL is present. APC support links to dated agreement details or Aalto SciFree. Agreement licences and journal licences remain distinct. The footer gives the JUFO snapshot date; source dates and agreement expiry are retained in the data and agreement dialog. Eligibility, article types and quotas still require checking with Aalto.
+
+The publishing-model value explains Gold, Diamond, Hybrid and uncertain status on hover, keyboard focus or tap. Publisher lists and OpenAlex supplement missing JUFO models across journals. **Not fully OA** does not confirm a Hybrid option, and OA status never establishes Aalto funding. See [publishing-model evidence and refresh](publishing-models.md).
+
+The history graph shows the full available JUFO history, excluding years before publication began. The table shows the latest five years. Hover or focus a point for its year and level. Missing values use open markers and dashed links at the baseline; a recorded level zero stays distinct from missing data. Unclassified journals are not assigned level zero.
+
+## Refresh the prepared data
+
+Tracked files under `data/` are compressed public metadata, not a private database. Refresh them before a release when the source information needs updating; the app does not silently replace them during a visitor's search.
+
+1. Download the official [CSC bulk export](https://jufo-rest.csc.fi/v1.1/massa.json.zip) into an execution artefact directory outside the source tree.
+2. Run the following command from the repository root, replacing the two paths with that directory's paths.
+3. Run the checks below, inspect the source dates and changed files, then commit the snapshots with the code that consumes them.
 
 ```sh
-python3.12 server.py
+python3.12 -B -m scripts.refresh_catalogue --bulk /absolute/path/massa.json.zip --cache /absolute/path/source-cache
 ```
 
-On the Workspace MacBook, use `/Volumes/PentagonToy/Workspace/Agents/Environment/m5/bin/python` in place of `python3.12`. Use the corresponding `m1pro` path on the M1 Pro. Pass `--port 8766` if port 8765 is in use, then open the matching address. Press Ctrl+C to stop the server.
+The refresh also prepares title/topic postings and a read-only SQLite store of compressed journal records. Multi-page searches display the first page while the remaining matches load; full-result filters become available after loading completes. Open card sections are preserved. Search loads the small title index and only the matching detailed records, so the first request does not parse the full JUFO export or rebuild every topic profile. Run `python3.12 -B -m scripts.prepare_search` after changing the source catalogue or topic snapshot independently. Source checksums reject stale indices.
 
-## Search for journals
+The script obtains full v2.1 series records and checks coverage against every series ID in the bulk export. It then retrieves OpenAlex topic descriptors and source profiles by registered ISSNs, plus the FinELib Elsevier list. Downloads are bounded and resumable within the same day; an older cache is refreshed. Each snapshot is replaced atomically after its preparation succeeds. A failed refresh exits with an error; do not publish an incomplete set of files.
 
-| Search mode | Example | What it returns |
-| --- | --- | --- |
-| Journal title or ISSN | `Results in Physics` or `2211-3797` | Up to 30 journal and series records from the CSC JUFO API. [CSC API documentation](https://wiki.eduuni.fi/spaces/cscvirtajtp/pages/578257375/v2.x) |
-| Research topic | `turbulent combustion` | Journals with matching article titles. Each result can show up to two articles with DOI links. [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/) |
+JUFO retains its own levels, histories, licences and OA metadata. OpenAlex supplies topic profiles, publishing-model evidence and the inputs for our calculated quartiles, not JCR quartiles or SCIE status. Topic profiles use the API's retained topic counts across its available publication history, not a fixed-year article cohort; these counts are normalised for ranking and are not probabilities. Ambiguous ISSN joins are excluded. FinELib terms retain their agreement expiry, and the selected SciFree observations retain their original observation dates.
 
-In journal mode, if a title search returns no matches, JUFOSearch tries individual title words and ranks candidates by word overlap. For example, `application in engineering combustion jufo` finds *Applications in Energy and Combustion Science*. The app also searches an acronym index generated from active scientific journals in the [CSC bulk export](https://wiki.eduuni.fi/spaces/cscvirtajtp/pages/48922203/Julkaisukanavatietokannan%2BREST-rajapinta). It derives forms from title initials and conjunctions, so `C&F` and `CNF` can return both *Combustion and Flame* and *Computers and Fluids*. Each candidate is checked against the live JUFO record. Run `python3.12 refresh_acronyms.py` to rebuild the index from the latest export.
+Sources: [CSC API](https://wiki.eduuni.fi/spaces/cscvirtajtp/pages/578257375/v2.x), [OpenAlex source attributes](https://help.openalex.org/data/sources/attributes/), [Aalto publishing agreements](https://www.aalto.fi/en/services/open-access-agreements-by-publisher), [FinELib Elsevier agreement](https://finelib.fi/open-access-publishing-in-elsevier-journals/).
 
-The main search box recognises `physics` (including `physcis`), `ml` and `cfd` as topic shortcuts. These topics begin with selected journals whose records are checked in JUFO. Topic search examines a limited set of recent Crossref article titles, groups matches by journal and checks their ISSNs against active JUFO records. For the three shortcut topics, it also screens article-derived results against relevant JUFO disciplines. Use the results to identify candidates for further review.
+## Verify and host
 
-## Interpret the results
+```sh
+python3.12 -B -m unittest discover -s tests -q
+node --test tests/*.cjs
+```
 
-Select a journal title to open its publisher page when a website is available. Use the separate Aalto SciFree link to check publishing support. Filter results by JUFO level, publisher, APC support, licence or publishing model. Select the APC status to see available contract terms, article types, quota information and sources. **Journal notes** contains subject areas and self-archiving information. Each card distinguishes an Aalto agreement licence from the licence reported by JUFO. [Aalto SciFree](https://search.scifree.se/aalto)
+Tests cover prepared search without network access, complete pagination, initials, Unicode, missing levels, history, topic explanations, title-only article evidence, agreement matching and compressed responses. The snapshot checks also exercise the shipped data.
 
-For eligible Elsevier journals, JUFOSearch matches ISSNs against the official FinELib title list and caches the list for one hour. This lookup covers the agreement through 31 December 2026. The app also includes dated SciFree records for selected Wiley, Springer and IOP titles. For journals without a verified match, expired terms or unavailable title data, the card points to SciFree. Check your eligibility, article type and any quota before submission. [FinELib Elsevier agreement](https://finelib.fi/open-access-publishing-in-elsevier-journals/) · [Aalto publishing agreements](https://www.aalto.fi/en/services/open-access-agreements)
+Vercel serves `public/` and runs `api/search.py` using the shared handler. `data/**` must be included in the Function bundle. Prepared API results are returned in batches of at most 1,000 records; the client collects every batch before enabling filters, with at most three page requests in flight when a total count is available. JSON responses support gzip. Complete successful responses are cached on the CDN for five minutes; source failures are not cached. Legacy journal pagination remains available, `mode=auto` and `mode=fast` use prepared discovery, and `mode=articles` explicitly requests live paper evidence.
 
-## Verify search changes
+## Refresh listed APCs
 
-Run `python3.12 -B -m unittest -v` from the repository directory. The tests exercise title ranking, ISSN normalisation, acronym collisions and agreement matching without network access.
-
-## Hosting on Vercel
-
-Import the GitHub repository as a Vercel project with the root directory left at the repository root. The configuration serves the interface from `public/` and runs `api/search.py` as a Python Function. The Function uses the same search handler as the local server. [Vercel Python runtime](https://vercel.com/docs/functions/runtimes/python)
+Run `python3.12 -B -m scripts.refresh_fees --sources /absolute/path/openalex-sources/2026-10-14` against the complete public Sources snapshot. The parser accepts only finite non-negative list prices with stated currencies, verifies source coverage, and omits ambiguous ISSN matches. It never substitutes reported paid amounts, missing prices or Aalto support terms for a list APC.

@@ -1,6 +1,7 @@
 """Serve the local journal finder and query its public sources."""
 
 import argparse
+import gzip
 import io
 import json
 import re
@@ -13,12 +14,18 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from functools import lru_cache
+from html import unescape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Lock
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
+
+from catalogue import search_titles, search_profiles, snapshot, hydrate
+from recommendations import recommend
+import oa_policy as oa
 
 JUFO = "https://jufo-rest.csc.fi/v2.1"
 CROSSREF = "https://api.crossref.org/works"
@@ -26,20 +33,34 @@ TOPIC_ALIASES = {
     "physcis": "physics",
     "ml": "machine learning",
     "cfd": "computational fluid dynamics",
+    "sgs": "subgrid scale",
+    "tci": "turbulence chemistry interaction",
+    "pasr": "partially stirred reactor",
+}
+TOPIC_VARIANTS = {
+    "computational fluid dynamics": ("computational fluid dynamics", "cfd", "large eddy simulation", "direct numerical simulation"),
+    "machine learning": ("machine learning", "deep learning", "neural network", "ml", "random forest", "support vector machine", "reinforcement learning", "symbolic regression", "clustering"),
+    "subgrid scale": ("subgrid scale", "subgrid", "subfilter scale", "sgs"),
+    "turbulence chemistry interaction": ("turbulence chemistry interaction", "turbulent chemistry interaction", "turbulence chemistry", "tci"),
+    "partially stirred reactor": ("partially stirred reactor", "pasr"),
+    "probability density function": ("probability density function", "probability density", "pdf"),
+}
+# Broader discovery terms only; article evidence still requires the original concepts
+PROFILE_HINTS = {
+    "partially stirred reactor": ("turbulent combustion",),
+    "subgrid scale": ("large eddy simulation",),
+    "turbulence chemistry interaction": ("turbulent combustion",),
 }
 TITLE_STOP_WORDS = {"a", "an", "and", "for", "in", "of", "on", "the", "jufo"}
-TOPIC_STARTERS = {
-    "physics": ("0031-9007", "0034-4885", "1367-2630", "2211-3797"),
-    "machine learning": ("0885-6125", "1532-4435", "0893-6080", "0162-8828",
-                         "2666-8270", "2632-2153", "2993-5210"),
-    "computational fluid dynamics": ("1070-6631", "0021-9991", "0045-7825", "0142-727X"),
-}
-TOPIC_DISCIPLINES = {
-    "physics": {"114", "115"},
-    "machine learning": {"113", "213"},
-    "computational fluid dynamics": {"114", "214"},
-}
 ISSN_FIELDS = ("issn_electronic", "issn_print", "issnl")
+RESULT_FIELDS = (
+    "jufo_id", "title", "publisher_name", *ISSN_FIELDS, "website", "is_active",
+    "level", "level_history", "year_start", "okm_disciplines", "matched_acronym", "examples",
+    "topic_match", "matched_keywords", "keyword_total", "agreement", "agreement_status",
+    "profile_keywords", "matched_topics", "quartiles", "publishing_model",
+    "recommendation_reason",
+    "apc",
+)
 LIST_URL = (
     "https://extra.kansalliskirjasto.fi/finelib_julkinen/lehtilistat/"
     "Elsevier/Freedom_publishing_title_list.xlsx"
@@ -73,11 +94,15 @@ SCIFREE_TITLES = {
 }
 ROOT = Path(__file__).resolve().parent / "public"
 ASSETS = {"/": ("index.html", "text/html"), "/style.css": ("style.css", "text/css"),
-          "/app.js": ("app.js", "text/javascript")}
+          "/app.js": ("app.js", "text/javascript"), "/theme.js": ("theme.js", "text/javascript")}
+ASSETS["/icon.svg"] = ("icon.svg", "image/svg+xml")
+ASSETS.update({"/fonts/" + path.name: ("fonts/" + path.name, "font/woff2")
+               for path in (ROOT / "fonts").glob("*.woff2")})
+ASSETS["/fonts/LICENSE.txt"] = ("fonts/LICENSE.txt", "text/plain")
 ISSN = re.compile(r"[0-9]{4}-?[0-9]{3}[0-9X]", re.I)
 NS = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-list_lock = Lock()
-list_cache = (0, None, None)
+crossref_lock = Lock()
+crossref_checked = 0
 
 
 def download(url, timeout=8):
@@ -101,6 +126,8 @@ def download_macos(url, timeout):
             check=True, capture_output=True,
         ).stdout
     except subprocess.CalledProcessError as error:
+        if error.returncode == 22 and b"429" in (error.stderr or b""):
+            raise HTTPError(url, 429, "Too many requests", None, None) from error
         raise OSError("Could not retrieve the upstream source") from error
 
 
@@ -136,30 +163,43 @@ def parse_title_list(payload):
     return journals
 
 
+@lru_cache(maxsize=1)
 def agreements():
-    global list_cache
-    with list_lock:
-        if time.monotonic() >= list_cache[0]:
-            try:
-                titles = parse_title_list(download(LIST_URL))
-                checked = datetime.now(ZoneInfo("Europe/Helsinki")).date().isoformat()
-                list_cache = (time.monotonic() + 3600, titles, checked)
-            except (OSError, ValueError, KeyError, IndexError, zipfile.BadZipFile, ET.ParseError):
-                list_cache = (time.monotonic() + 60, None, None)
-        return list_cache[1:]
+    data = snapshot("agreements")
+    return {key: {tuple(value) for value in values} for key, values in data["titles"].items()}, data["checked"]
 
 
-def search_jufo(query, size=30):
-    is_issn = ISSN.fullmatch(query)
-    if is_issn:
-        compact = query.replace("-", "").upper()
-        query = compact[:4] + "-" + compact[4:]
-    parameters = {"issn" if is_issn else "name": query, "type": "series", "_size": size}
-    rows = json.loads(download(f"{JUFO}/search?{urlencode(parameters)}"))
-    if not isinstance(rows, list):
-        raise ValueError("Unexpected JUFO response")
-    return sorted(rows, key=lambda row: (row.get("title", "").casefold() != query.casefold(),
-                                         row.get("is_active") is not True))
+def search_jufo(query, size=100, offset=0):
+    rows, _ = search_titles(query)
+    return rows[offset:offset + size]
+
+
+def search_prepared(query):
+    query = normalise_journal_query(query)
+    normalised = " ".join(query.casefold().split())
+    title_query = TOPIC_ALIASES.get(normalised, query)
+    rows, exact = search_titles(title_query)
+    if exact and normalised not in TOPIC_ALIASES:
+        return rows, False
+
+    concepts = keyword_topics(query)
+    multiple = len(concepts) > 1 or bool(re.search(r"[,;，]", query))
+    terms = set(title_keywords(query))
+    title_overlap = any(len(terms.intersection(title_keywords(row["title"]))) >= max(2, len(terms) - 1)
+                        for row in rows)
+    if not multiple and rows and normalised not in TOPIC_ALIASES and (len(terms) < 2 or title_overlap):
+        return rows, False
+
+    related = search_profiles(concepts, TOPIC_VARIANTS, PROFILE_HINTS)
+    anchors = {label for concept, label in concepts.items()
+               if concept in PROFILE_HINTS or concept == "computational fluid dynamics"}
+    if anchors:
+        related = [row for row in related if anchors.intersection(row["profile_keywords"])]
+    matches = {row["jufo_id"]: row for row in ([] if multiple else rows)}
+    for row in related:
+        matches[row["jufo_id"]] = row
+
+    return list(matches.values()), True
 
 
 def folded(text):
@@ -175,92 +215,66 @@ def title_keywords(text):
     ))
 
 
-def acronym_key(text):
-    return re.sub(r"[^\w&]|_", "", folded(text))
-
-
-def title_acronyms(title):
-    words = re.findall(r"[^\W_]+|&", folded(title))
-    if len(words) < 2:
-        return set()
-    words = ["and" if word == "&" else word for word in words]
-    significant = [word for word in words if word not in TITLE_STOP_WORDS or word == "and"]
-    keys = {
-        "".join(word[0] for word in words),
-        "".join(word[0] for word in significant if word != "and"),
-    }
-    if "and" in significant:
-        for conjunction in ("&", "n"):
-            keys.add("".join(conjunction if word == "and" else word[0] for word in significant))
-    return keys
-
-
-@lru_cache(maxsize=1)
-def acronym_index():
-    path = Path(__file__).with_name("journal-acronyms.json")
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def acronym_results(query):
-    if not re.fullmatch(r"(?:[^\W_]|[&.\s])+", query):
-        return []
-    parts = query.replace(".", " ").replace("&", " ").split()
-    if len(parts) > 1 and any(len(part) != 1 for part in parts):
-        return []
-    key = acronym_key(query)
-    if not 2 <= len(key) <= 8:
-        return []
-    ids = acronym_index().get(key, ())
-    if not ids:
-        return []
-
-    def current_record(jufo_id):
-        return json.loads(download(f"{JUFO}/channel/{jufo_id}"))
-
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        return [dict(row, matched_acronym=key.upper())
-                for batch in pool.map(current_record, ids[:30])
-                for row in batch if row.get("is_active")]
-
-
 def normalise_journal_query(query):
     query = unicodedata.normalize("NFKC", query).strip().strip('"“”').strip()
     query = re.sub(r"\s+jufo$", "", query, flags=re.I)
     return re.sub(r"[‐‑‒–−]", "-", query)
 
 
-def search_journal(query):
+def search_journal(query, offset=0):
+    return search_jufo(normalise_journal_query(query), offset=offset)
+
+
+def search_journal_batch(query, offset=0, pages=1):
+    rows = search_jufo(normalise_journal_query(query), size=pages * 100, offset=offset)
+    return rows, offset + len(rows) if len(rows) == pages * 100 else None
+
+
+def keyword_topics(query):
     query = normalise_journal_query(query)
-    if ISSN.fullmatch(query):
-        return search_jufo(query)
-    rows = search_jufo(query)
-    if any(row["title"].casefold() == query.casefold() for row in rows):
-        return rows
-    aliases = acronym_results(query)
-    if aliases:
-        alias_ids = {row["jufo_id"] for row in aliases}
-        return (aliases + [row for row in rows if row["jufo_id"] not in alias_ids])[:30]
-    terms = title_keywords(query)
-    if rows or len(terms) < 2:
-        return rows
+    parts = re.split(r"[,;，]+", query)
+    words = query.split()
+    if len(parts) == 1 and len(words) > 1 and all(word.casefold() in TOPIC_ALIASES for word in words):
+        parts = words
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        batches = pool.map(lambda term: search_jufo(term, size=60), terms[:4])
-        candidates = {row["jufo_id"]: row for batch in batches for row in batch}
+    topics = {}
+    for part in parts:
+        normalised = " ".join(part.casefold().split())
+        if normalised:
+            topic = TOPIC_ALIASES.get(normalised, normalised)
+            if normalised == "pdf" and any(re.search(r"\b" + anchor + r"\b", query, re.I)
+                                           for anchor in ("pasr", "cfd", "tci", "sgs", "combustion", "turbulence",
+                                                          "partially stirred reactor", "fluid dynamics")):
+                topic = "probability density function"
+            label = normalised.upper() if normalised in TOPIC_ALIASES and len(normalised) <= 3 else part.strip()
+            topics.setdefault(topic, label)
 
-    overlaps = {
-        key: set(terms).intersection(title_keywords(row["title"]))
-        for key, row in candidates.items()
-    }
-    frequency = {term: sum(term in match for match in overlaps.values()) for term in terms}
-    return sorted(
-        (row for key, row in candidates.items() if overlaps[key]),
-        key=lambda row: (
-            -len(overlaps[row["jufo_id"]]),
-            row.get("is_active") is not True,
-            -sum(1 / frequency[term] for term in overlaps[row["jufo_id"]]),
-        ),
-    )[:30]
+    return topics
+
+
+def topic_words(text):
+    text = re.sub(r"\bsub[-\s]+grid\b", "subgrid", folded(text))
+    words = set(title_keywords(text))
+    words.update(word for word in re.findall(r"[^\W_]+", text)
+                 if len(word) <= 2 and word not in TITLE_STOP_WORDS)
+    return words
+
+
+def matches_topic(topic, title):
+    words = topic_words(title)
+    for variant in TOPIC_VARIANTS.get(topic, (topic,)):
+        terms = topic_words(variant)
+        if terms and terms <= words:
+            return True
+    return False
+
+
+def compact_result(row):
+    result = {field: row[field] for field in RESULT_FIELDS if field in row}
+    external = row.get("external") or {}
+    result["external"] = {field: external[field] for field in ("oa_info", "license", "index_info")
+                          if field in external}
+    return result
 
 
 def journal_identifiers(row):
@@ -277,16 +291,28 @@ def find_venue(identifiers):
     return None
 
 
-def topic_works(topic):
-    since = date.today().year - 4
+def topic_works(topic, keywords=None, minimum=1):
+    global crossref_checked
+    since = date.today().year - 9
     parameters = {
-        "query.title": topic,
+        "query.bibliographic" if keywords else "query.title": topic,
         "filter": f"type:journal-article,from-pub-date:{since}-01-01",
         "rows": 60,
         "select": "DOI,title,container-title,ISSN",
     }
-    data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
-    terms = set(re.findall(r"[^\W_]+", topic.casefold()))
+    # Crossref's public list endpoint permits one request per second and one in flight.
+    with crossref_lock:
+        for attempt in range(2):
+            time.sleep(max(0, 1.1 - (time.monotonic() - crossref_checked)))
+            crossref_checked = time.monotonic()
+            try:
+                data = json.loads(download(f"{CROSSREF}?{urlencode(parameters)}", timeout=15))
+                break
+            except HTTPError as error:
+                retry_after = error.headers.get("Retry-After", "1") if error.headers else "1"
+                if error.code != 429 or attempt or not retry_after.isdigit() or int(retry_after) > 2:
+                    raise
+                time.sleep(max(1, int(retry_after)))
     venues = {}
     for item in data["message"]["items"]:
         titles = item.get("title") or []
@@ -295,54 +321,88 @@ def topic_works(topic):
         doi = item.get("DOI")
         if not (titles and names and identifiers and doi):
             continue
-        if not terms <= set(re.findall(r"[^\W_]+", titles[0].casefold())):
+        title = unescape(re.sub(r"</?[A-Za-z][^>]*>", "", titles[0]))
+        text = title
+        matched = [label for term, label in (keywords or {topic: topic}).items() if matches_topic(term, text)]
+        if len(matched) < minimum or (minimum == 1 and not matches_topic(topic, text)):
             continue
         key = (names[0].casefold(), tuple(sorted(identifiers)))
         venue = venues.setdefault(key, {"issns": key[1], "works": {}})
-        venue["works"][doi] = {"title": titles[0], "doi": doi}
+        work = {"title": title, "doi": doi}
+        if keywords:
+            work["keywords"] = matched
+        venue["works"][doi] = work
+    if keywords:
+        return sorted(venues.values(), key=lambda venue: keyword_rank(list(venue["works"].values())))[:24 if minimum > 1 else 12]
     return sorted(venues.values(), key=lambda venue: -len(venue["works"]))[:8]
 
 
-def search_topic(topic):
-    starters = TOPIC_STARTERS.get(topic, ())
-    disciplines = TOPIC_DISCIPLINES.get(topic)
-    matches = {}
+def keyword_rank(works):
+    coverage = {keyword for work in works for keyword in work["keywords"]}
+    return (-max((len(work["keywords"]) for work in works), default=0), -len(coverage), -len(works))
+
+
+def search_keywords(topics):
+    venues = {}
     notices = []
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        articles = pool.submit(topic_works, topic)
-        pending = [(pool.submit(find_venue, (issn,)), None) for issn in starters]
+    successful = 0
+    deadline = time.monotonic() + 25
+    lookups = [(" ".join(topics), "Combined keyword", 2)] if len(topics) > 1 else []
+    lookups.extend((topic, label, 1) for topic, label in topics.items())
+    for topic, label, minimum in lookups:
         try:
-            venues = articles.result()
+            if time.monotonic() >= deadline:
+                raise OSError("Article lookup budget exhausted")
+            batch = topic_works(topic, keywords=topics, minimum=minimum)
         except (OSError, ValueError, KeyError, TypeError):
-            if not pending:
-                raise OSError("Article search is temporarily unavailable.") from None
-            notices.append("Article search is temporarily unavailable. Showing topic starting points.")
-            venues = []
-        pending.extend((pool.submit(find_venue, venue["issns"][:2]), venue)
-                       for venue in venues)
-        incomplete = False
-        for future, venue in pending:
+            notices.append(f"{label} article lookup unavailable.")
+            continue
+        successful += 1
+        for venue in batch:
+            key = tuple(sorted(venue["issns"]))
+            match = venues.setdefault(key, {"issns": key, "works": {}})
+            match["works"].update(venue["works"])
+    if not successful:
+        raise OSError("Article search is temporarily unavailable.")
+
+    candidates = [venue for venue in venues.values()
+                  if len(topics) == 1 or any(len(work["keywords"]) >= 2 for work in venue["works"].values())]
+    candidates = sorted(candidates, key=lambda venue: keyword_rank(list(venue["works"].values())))[:32]
+    matches = {}
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        pending = [(venue, pool.submit(find_venue, venue["issns"][:2])) for venue in candidates]
+        for venue, future in pending:
             try:
                 row = future.result()
             except (OSError, ValueError):
-                incomplete = True
+                if "Some JUFO records unavailable." not in notices:
+                    notices.append("Some JUFO records unavailable.")
                 continue
             if row is None:
                 continue
-            if venue and disciplines and not disciplines.intersection(
-                field["id"] for field in row.get("okm_disciplines", [])
-            ):
-                continue
-            match = matches.setdefault(row["jufo_id"], row)
-            if venue:
-                examples = list(venue["works"].values())
-                match["examples"] = list({work["doi"]: work for work in
-                                          match.get("examples", []) + examples}.values())[:2]
-        if incomplete:
-            if not matches:
-                raise OSError("JUFO is temporarily unavailable.")
-            notices.append("Some journal records could not be checked in JUFO.")
-    return list(matches.values()), notices
+            match = matches.setdefault(row["jufo_id"], dict(row, examples=[], matched_keywords=[], keyword_total=len(topics)))
+            works = {work["doi"]: work for work in match["examples"]}
+            works.update(venue["works"])
+            match["examples"] = sorted(works.values(), key=lambda work: -len(work["keywords"]))
+            coverage = {keyword for work in match["examples"] for keyword in work["keywords"]}
+            match["matched_keywords"] = [label for label in topics.values() if label in coverage]
+
+    results = sorted(matches.values(), key=lambda row: keyword_rank(row["examples"]))
+    for row in results:
+        remaining = row["examples"]
+        examples = []
+        covered = set()
+        for _ in range(min(3, len(remaining))):
+            work = max(remaining, key=lambda item: (len(set(item["keywords"]) - covered), len(item["keywords"])))
+            examples.append(work)
+            covered.update(work["keywords"])
+            remaining.remove(work)
+        row["examples"] = examples
+    return results, notices
+
+
+def search_topic(topic):
+    return search_profiles(keyword_topics(topic), TOPIC_VARIANTS, PROFILE_HINTS), []
 
 
 def add_agreements(rows):
@@ -383,22 +443,105 @@ def add_agreements(rows):
                                     "quota": "Aalto reports that the quota was removed for the rest of 2026."}
 
 
+def add_quartiles(rows):
+    data = snapshot("quartiles")
+    context = {key: data[key] for key in ("edition", "snapshot_date", "citation_year", "publication_years", "cohort")}
+    for row in rows:
+        entry = data["journals"].get(str(row["jufo_id"]))
+        row["quartiles"] = {**entry, **context} if entry else None
+
+
+def add_publishing_models(rows):
+    data = snapshot("publishing-models")["journals"]
+    for row in rows:
+        row["publishing_model"] = data.get(str(row["jufo_id"]))
+        row["apc"] = snapshot("fees")["journals"].get(str(row["jufo_id"]))
+
+
 class Handler(BaseHTTPRequestHandler):
-    def respond(self, status, media, body):
+    def respond(self, status, media, body, cache="no-store"):
+        encodings = getattr(self, "headers", {}).get("Accept-Encoding", "").lower().split(",")
+        compressed = media == "application/json" and "gzip" in {value.strip() for value in encodings}
+        if compressed:
+            body = gzip.compress(body, compresslevel=3)
         self.send_response(status)
         self.send_header("Content-Type", f"{media}; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
+        if media == "application/json":
+            self.send_header("Vary", "Accept-Encoding")
+        if compressed:
+            self.send_header("Content-Encoding", "gzip")
         self.end_headers()
         self.wfile.write(body)
 
     def send_json(self, status, data):
-        self.respond(status, "application/json", json.dumps(data).encode())
+        cacheable = (status == 200 and not data.get("notices")
+                     and all(row.get("agreement_status") != "unavailable" for row in data.get("results", [])))
+        cache = "public, max-age=0, s-maxage=300" if cacheable else "no-store"
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
+        self.respond(status, "application/json", body, cache=cache)
 
     def do_GET(self):
         url = urlsplit(self.path)
-        if url.path in ASSETS:
+        if url.path == "/api/institutions":
+            query = parse_qs(url.query).get("q", [""])[0].strip()
+            if not 3 <= len(query) <= 100:
+                self.send_json(400, {"error": "Enter at least three characters of an institution name or ROR"})
+                return
+            try:
+                self.send_json(200, {"results": oa.institutions(query, int(time.time() // 86400))})
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                self.send_json(502, {"error": "Institution search is unavailable. Try again."})
+        elif url.path == "/api/oa":
+            parameters = parse_qs(url.query)
+            if not parameters:
+                self.send_json(200, {"funders": oa.FUNDERS, "institution": oa.DEFAULT_INSTITUTION})
+                return
+            values = [parameters.get(key, [""])[0] for key in ("issn", "funder", "ror")]
+            candidates = [values[0]]
+            try:
+                oa.validate(*values)
+                reference = parameters.get("journal", [""])[0]
+                if reference:
+                    if not reference.isascii() or not reference.isdigit() or len(reference) > 8:
+                        raise ValueError("Invalid reference journal")
+                    row = hydrate([{"jufo_id": int(reference)}])[0]
+                    identifiers = list(dict.fromkeys(row[field] for field in ("issnl", "issn_print", "issn_electronic") if row.get(field)))
+                    if values[0] not in identifiers:
+                        raise ValueError("ISSN does not belong to this journal")
+                    candidates = identifiers
+                    for identifier in candidates:
+                        oa.validate(identifier, *values[1:])
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+                return
+            try:
+                self.send_json(200, oa.check(tuple(candidates), *values[1:], int(time.time() // 3600)))
+            except oa.JournalMismatch as error:
+                self.send_json(409, {"error": str(error), "code": "journal_mismatch"})
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError, AttributeError, IndexError):
+                self.send_json(502, {"error": "OA check is unavailable for this combination. Try again or open JCT."})
+        elif url.path == "/api/recommend":
+            parameters = parse_qs(url.query)
+            reference = parameters.get("id", [""])[0]
+            if not reference.isascii() or not reference.isdigit() or len(reference) > 8:
+                self.send_json(400, {"error": "Invalid reference journal."})
+                return
+            try:
+                rows, notice = recommend(int(reference))
+                rows = hydrate(rows)
+                add_agreements(rows)
+                add_quartiles(rows)
+                add_publishing_models(rows)
+                self.send_json(200, {"results": [compact_result(row) for row in rows],
+                                     "notices": [notice] if notice else []})
+            except KeyError:
+                self.send_json(404, {"error": "Reference journal not found."})
+            except (OSError, ValueError):
+                self.send_json(502, {"error": "Similar journals are temporarily unavailable."})
+        elif url.path in ASSETS:
             filename, media = ASSETS[url.path]
             self.respond(200, media, (ROOT / filename).read_bytes())
         elif url.path == "/api/search":
@@ -409,17 +552,59 @@ class Handler(BaseHTTPRequestHandler):
                 return
             normalised = " ".join(query.casefold().split())
             topic = TOPIC_ALIASES.get(normalised, normalised)
-            topic_mode = not ISSN.fullmatch(normalise_journal_query(query)) and (
-                parameters.get("mode") == ["topic"] or topic in TOPIC_STARTERS
-            )
+            mode = parameters.get("mode", ["journal"])[0]
+            if mode not in {"journal", "auto", "fast", "topic", "articles"}:
+                self.send_json(400, {"error": "Invalid search mode."})
+                return
+            topics = keyword_topics(query)
+            if mode in {"auto", "topic", "fast", "articles"} and (not topics or len(topics) > 8):
+                self.send_json(400, {"error": "Enter between 1 and 8 keywords."})
+                return
+            topic_mode = (parameters.get("mode") == ["topic"]
+                          and not ISSN.fullmatch(normalise_journal_query(query)))
+            offset_text = parameters.get("offset", ["0"])[0]
+            if not offset_text.isascii() or not offset_text.isdigit() or len(offset_text) > 5:
+                self.send_json(400, {"error": "Invalid search page. Start a new search."})
+                return
+            offset = int(offset_text)
+            pages_text = parameters.get("batch", ["1"])[0]
+            if pages_text not in {"1", "5"}:
+                self.send_json(400, {"error": "Invalid search batch. Start a new search."})
+                return
+            pages = int(pages_text)
             try:
-                results, notices = search_topic(topic) if topic_mode else (search_journal(query), [])
+                next_offset = None
+                total = None
+                notices = []
+                if mode in {"fast", "auto"}:
+                    results, topic_mode = search_prepared(query)
+                    total = len(results)
+                    if len(results) > offset + 1000:
+                        next_offset = offset + 1000
+                    results = results[offset:offset + 1000]
+                elif mode == "articles":
+                    topic_mode = True
+                    results, notices = search_keywords(topics)
+                elif topic_mode:
+                    results, notices = search_topic(topic)
+                    total = len(results)
+                    if len(results) > offset + 1000:
+                        next_offset = offset + 1000
+                    results = results[offset:offset + 1000]
+                else:
+                    results, next_offset = search_journal_batch(query, offset, pages)
+                results = hydrate(results)
                 add_agreements(results)
+                add_quartiles(results)
+                add_publishing_models(results)
             except (OSError, ValueError):
                 service = "Topic search" if topic_mode else "JUFO"
                 self.send_json(502, {"error": f"{service} is temporarily unavailable. Try again shortly."})
             else:
-                self.send_json(200, {"results": results, "notices": notices,
+                self.send_json(200, {"results": [compact_result(row) for row in results], "notices": notices,
+                                     "next_offset": next_offset,
+                                     "total": total,
+                                     "catalogue_checked": snapshot("titles")["checked"],
                                      "topic": topic if topic_mode else None})
         else:
             self.send_error(404)

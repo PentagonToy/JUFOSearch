@@ -4,62 +4,98 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>JUFOSearch · Journal finder</title>
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <link rel="preload" href="/fonts/plex-sans-regular-78efbe80.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/plex-sans-semibold-0fe2655c.woff2" as="font" type="font/woff2" crossorigin>
+  <script src="/theme.js"></script>
   <link rel="stylesheet" href="/style.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
   <header class="masthead">
     <div class="wrap masthead-inner">
-      <a class="brand" href="/"><span class="mark" aria-hidden="true">J</span> JUFOSearch</a>
-      <a class="policy" href="https://www.aalto.fi/en/services/open-access-agreements" target="_blank" rel="noopener">Aalto publishing agreements ↗</a>
+      <a class="brand" href="/">JUFOSearch</a>
+      <div class="masthead-actions">
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Use dark theme" title="Use dark theme">
+          <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 13.5A8.5 8.5 0 0 1 10.5 3a8.5 8.5 0 1 0 10 10.5Z"/></svg>
+          <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+        </button>
+      </div>
     </div>
   </header>
   <main class="wrap">
     <section class="hero" aria-labelledby="page-title">
-      <p class="eyebrow">JOURNAL FINDER</p>
       <h1 id="page-title">Find a journal</h1>
-      <p class="lede">Look up a journal or discover where research on your topic is published.</p>
+      <p class="hero-note">JUFO, publishing support and open access.</p>
       <form id="search">
-        <fieldset class="modes">
-          <legend class="sr-only">Search by</legend>
-          <label><input type="radio" name="mode" value="journal" checked> Journal title or ISSN</label>
-          <label><input type="radio" name="mode" value="topic"> Research topic</label>
-        </fieldset>
         <div class="search-row">
-          <label for="query" id="query-label" class="sr-only">Journal title or ISSN</label>
-          <input id="query" type="search" name="q" placeholder="Journal title, ISSN or initials" minlength="2" maxlength="160" required>
+          <label for="query" class="sr-only">Journal title, ISSN, initials or keywords</label>
+          <input id="query" type="search" name="q" placeholder="Journal, ISSN or keywords" minlength="2" maxlength="160" required>
           <button class="primary" type="submit">Search</button>
         </div>
       </form>
-      <div class="examples">
-        <span>Explore a topic</span>
-        <button type="button" data-query="physics">Physics</button>
-        <button type="button" data-query="ml">Machine learning</button>
-        <button type="button" data-query="cfd">CFD</button>
+      <div class="search-tools">
+        <div id="recent-searches" class="recent-searches" role="group" aria-label="Recent searches on this browser" hidden>
+          <div id="recent-queries" class="recent-queries"></div>
+          <button id="clear-recent" class="text-button" type="button">Clear history</button>
+        </div>
+        <button class="preferences-trigger text-button" type="button" popovertarget="oa-preferences" aria-label="Publishing preferences">
+          <svg class="section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M9 4v6m6 4v6"/></svg>
+          Preferences
+        </button>
       </div>
     </section>
     <section class="results" aria-label="Search results">
-      <p id="status" role="status" aria-live="polite">Results include JUFO classification, publishing fees and licence information.</p>
+      <p id="status" role="status" aria-live="polite" hidden></p>
       <p id="notices" role="status" hidden></p>
       <fieldset id="filters" class="filters" hidden>
         <legend class="sr-only">Filter results</legend>
-        <label>JUFO level <select name="level"></select></label>
-        <label>Publisher <select name="publisher"></select></label>
-        <label>APC support <select name="fee"></select></label>
-        <label>Licence <select name="licence"></select></label>
-        <label>Publishing model <select name="model"></select></label>
-        <button id="reset-filters" class="secondary" type="button">Clear filters</button>
+        <details class="facet" data-field="level"><summary>JUFO level <span></span></summary><fieldset><legend class="sr-only">JUFO level</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="publisher"><summary>Publisher <span></span></summary><fieldset><legend class="sr-only">Publisher</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="fee"><summary>APC support <span></span></summary><fieldset><legend class="sr-only">APC support</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="licence"><summary>Licence <span></span></summary><fieldset><legend class="sr-only">Licence</legend><div class="choices"></div></fieldset></details>
+        <details class="facet" data-field="model"><summary>Publishing model <span></span></summary><fieldset><legend class="sr-only">Publishing model</legend><div class="choices"></div></fieldset></details>
+        <button id="reset-filters" class="text-button" type="button" hidden>Clear filters</button>
       </fieldset>
-      <p id="filter-status" role="status" hidden></p>
+      <div class="result-toolbar">
+        <div class="result-summary">
+          <p id="filter-status" role="status" aria-atomic="true" hidden></p>
+          <button id="article-search" class="text-button" type="button" hidden>Find matching articles</button>
+        </div>
+        <div id="pagination" class="pagination" hidden>
+          <label class="page-size" for="page-size">Per page
+            <select id="page-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option></select>
+          </label>
+          <nav class="page-navigation" aria-label="Results pages">
+            <button type="button" class="secondary" data-page="previous">Previous</button>
+            <span data-page-label tabindex="-1"></span>
+            <button type="button" class="secondary" data-page="next">Next</button>
+          </nav>
+        </div>
+      </div>
       <div id="cards"></div>
+      <nav id="bottom-pagination" class="page-navigation bottom-pagination" aria-label="Results pages at end of list" hidden>
+        <button type="button" class="secondary" data-page="previous">Previous</button>
+        <span data-page-label></span>
+        <button type="button" class="secondary" data-page="next">Next</button>
+      </nav>
     </section>
     <footer>
+      <a href="https://www.aalto.fi/en/services/open-access-agreements" target="_blank" rel="noopener">Aalto agreements ↗</a>
       <a href="https://jfp.csc.fi/jufoportal" target="_blank" rel="noopener">JUFO Portal ↗</a>
       <a href="https://search.scifree.se/aalto" target="_blank" rel="noopener">Aalto SciFree ↗</a>
       <a href="https://www.crossref.org/documentation/retrieve-metadata/rest-api/" target="_blank" rel="noopener">Crossref ↗</a>
       <a href="https://finelib.fi/open-access-publishing-in-elsevier-journals/" target="_blank" rel="noopener">FinELib ↗</a>
+      <a class="github-link" href="https://github.com/PentagonToy/JUFOSearch" target="_blank" rel="noopener">GitHub ↗</a>
+      <small id="catalogue-date" hidden></small>
     </footer>
   </main>
+  <div id="oa-preferences" popover="auto" aria-labelledby="preferences-title">
+    <header class="preferences-header">
+      <h2 id="preferences-title">Publishing preferences</h2>
+      <button class="text-button" type="button" popovertarget="oa-preferences" popovertargetaction="hide">Close</button>
+    </header>
+  </div>
   <dialog id="agreement-dialog" aria-labelledby="agreement-title">
     <header class="dialog-header">
       <h2 id="agreement-title"></h2>
